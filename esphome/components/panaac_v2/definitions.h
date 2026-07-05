@@ -1,0 +1,268 @@
+/*
+ * Copyright 2025 Hoang Minh
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+#include "esphome/components/climate/climate_mode.h"
+#include "esphome/core/log.h"
+#include <cinttypes>
+#include <cstdlib>
+#include <cstring>
+
+namespace esphome::panaac_v2 {
+
+static const char *const TAG = "panaac_v2";
+
+/// HVAC operation modes (mirrors climate::ClimateMode without pulling in the climate component).
+enum Mode : uint8_t {
+  MODE_OFF = 0,
+  MODE_HEAT_COOL = 1,
+  MODE_COOL = 2,
+  MODE_HEAT = 3,
+  MODE_FAN_ONLY = 4,
+  MODE_DRY = 5,
+  MODE_AUTO = 6,
+};
+
+// Temperature
+static const uint8_t PANAAC_TEMP_MIN = 16;  // Celsius
+static const uint8_t PANAAC_TEMP_MAX = 30;  // Celsius
+
+// Pulse parameters in usec
+const uint16_t PANAAC_BIT_MARK = 550;
+const uint16_t PANAAC_ONE_SPACE = 1200;
+const uint16_t PANAAC_ZERO_SPACE = 350;
+const uint16_t PANAAC_HEADER_MARK = 3650;
+const uint16_t PANAAC_HEADER_SPACE = 1600;
+const uint16_t PANAAC_FRAME_END = 10000;
+
+// IR transmit frequency
+const uint16_t PANAAC_IR_TRANSMIT_FREQ = 38000;
+
+// byte position
+const uint8_t PANAAC_BYTEPOS_POWER = 5;
+const uint8_t PANAAC_BYTEPOS_MODE = 5;
+const uint8_t PANAAC_BYTEPOS_TEMP = 6;
+const uint8_t PANAAC_BYTEPOS_FAN = 8;
+const uint8_t PANAAC_BYTEPOS_SWINGV = 8;
+const uint8_t PANAAC_BYTEPOS_SWINGH = 9;
+const uint8_t PANAAC_BYTEPOS_QUIET = 13;
+
+// byte values
+const uint8_t PANAAC_POWER_MASK = 0x01;  // only bit 0 encodes power state
+const uint8_t PANAAC_POWER_OFF = 0x00;   // bit 0 = 0 -> OFF
+const uint8_t PANAAC_POWER_ON = 0x01;    // bit 0 = 1 -> ON
+
+const uint8_t PANAAC_MODE_DRY = 0x20;
+const uint8_t PANAAC_MODE_COOL = 0x30;
+const uint8_t PANAAC_MODE_HEAT = 0x40;
+const uint8_t PANAAC_MODE_FAN_ONLY = 0x60;
+const uint8_t PANAAC_MODE_AUTO = 0x00;
+
+enum FanLevel : uint8_t {
+  PANAAC_FAN_AUTO = 0xA0,
+  PANAAC_FAN_LEVEL_1 = 0x30,
+  PANAAC_FAN_LEVEL_2 = 0x40,
+  PANAAC_FAN_LEVEL_3 = 0x50,
+  PANAAC_FAN_LEVEL_4 = 0x60,
+  PANAAC_FAN_LEVEL_5 = 0x70,
+  PANAAC_FAN_QUIET = 0x20,
+};
+
+enum SwingVPos : uint8_t {
+  PANAAC_SWINGV_AUTO = 0x0F,
+  PANAAC_SWINGV_HIGHEST = 0x01,
+  PANAAC_SWINGV_HIGH = 0x02,
+  PANAAC_SWINGV_MIDDLE = 0x03,
+  PANAAC_SWINGV_LOWEST = 0x05,
+  PANAAC_SWINGV_LOW = 0x04,
+};
+
+enum SwingHPos : uint8_t {
+  PANAAC_SWINGH_NONE = 0x00,
+  PANAAC_SWINGH_MIDDLE = 0x06,
+  PANAAC_SWINGH_LEFTMAX = 0x09,
+  PANAAC_SWINGH_LEFT = 0x0A,
+  PANAAC_SWINGH_RIGHT = 0x0B,
+  PANAAC_SWINGH_RIGHTMAX = 0x0C,
+  PANAAC_SWINGH_AUTO = 0x0D,
+};
+
+static const char *const STR_FAN_AUTO = "Auto";
+static const char *const STR_FAN_L1 = "Level 1";
+static const char *const STR_FAN_L2 = "Level 2";
+static const char *const STR_FAN_L3 = "Level 3";
+static const char *const STR_FAN_L4 = "Level 4";
+static const char *const STR_FAN_L5 = "Level 5";
+static const char *const STR_FAN_QUIET = "Quiet";
+
+static const char *const STR_SWINGV_AUTO = "Auto";
+static const char *const STR_SWINGV_HIGHEST = "Highest";
+static const char *const STR_SWINGV_HIGH = "High";
+static const char *const STR_SWINGV_MIDDLE = "Middle";
+static const char *const STR_SWINGV_LOW = "Low";
+static const char *const STR_SWINGV_LOWEST = "Lowest";
+
+static const char *const STR_SWINGH_AUTO = "Auto";
+static const char *const STR_SWINGH_LEFTMAX = "Left Max";
+static const char *const STR_SWINGH_LEFT = "Left";
+static const char *const STR_SWINGH_MIDDLE = "Middle";
+static const char *const STR_SWINGH_RIGHT = "Right";
+static const char *const STR_SWINGH_RIGHTMAX = "Right Max";
+
+// Map a Panasonic fan-level byte to the user-facing string.
+inline const char *fan_level_to_str(FanLevel level) {
+  switch (level) {
+    case PANAAC_FAN_LEVEL_1:
+      return STR_FAN_L1;
+    case PANAAC_FAN_LEVEL_2:
+      return STR_FAN_L2;
+    case PANAAC_FAN_LEVEL_3:
+      return STR_FAN_L3;
+    case PANAAC_FAN_LEVEL_4:
+      return STR_FAN_L4;
+    case PANAAC_FAN_LEVEL_5:
+      return STR_FAN_L5;
+    case PANAAC_FAN_QUIET:
+      return STR_FAN_QUIET;
+    default:
+      return STR_FAN_AUTO;
+  }
+}
+
+// Map a user-facing fan-mode string to the Panasonic fan-level byte.
+inline FanLevel fan_level_from_str(const char *value) {
+  if (strcmp(value, STR_FAN_L1) == 0)
+    return PANAAC_FAN_LEVEL_1;
+  if (strcmp(value, STR_FAN_L2) == 0)
+    return PANAAC_FAN_LEVEL_2;
+  if (strcmp(value, STR_FAN_L3) == 0)
+    return PANAAC_FAN_LEVEL_3;
+  if (strcmp(value, STR_FAN_L4) == 0)
+    return PANAAC_FAN_LEVEL_4;
+  if (strcmp(value, STR_FAN_L5) == 0)
+    return PANAAC_FAN_LEVEL_5;
+  if (strcmp(value, STR_FAN_QUIET) == 0)
+    return PANAAC_FAN_QUIET;
+  return PANAAC_FAN_AUTO;
+}
+
+inline const char *swing_v_pos_to_str(SwingVPos pos) {
+  switch (pos) {
+    case PANAAC_SWINGV_HIGHEST:
+      return STR_SWINGV_HIGHEST;
+    case PANAAC_SWINGV_HIGH:
+      return STR_SWINGV_HIGH;
+    case PANAAC_SWINGV_MIDDLE:
+      return STR_SWINGV_MIDDLE;
+    case PANAAC_SWINGV_LOW:
+      return STR_SWINGV_LOW;
+    case PANAAC_SWINGV_LOWEST:
+      return STR_SWINGV_LOWEST;
+    default:
+      return STR_SWINGV_AUTO;
+  }
+}
+
+inline SwingVPos swing_v_pos_from_str(const char *value) {
+  if (strcmp(value, STR_SWINGV_HIGHEST) == 0)
+    return PANAAC_SWINGV_HIGHEST;
+  if (strcmp(value, STR_SWINGV_HIGH) == 0)
+    return PANAAC_SWINGV_HIGH;
+  if (strcmp(value, STR_SWINGV_MIDDLE) == 0)
+    return PANAAC_SWINGV_MIDDLE;
+  if (strcmp(value, STR_SWINGV_LOW) == 0)
+    return PANAAC_SWINGV_LOW;
+  if (strcmp(value, STR_SWINGV_LOWEST) == 0)
+    return PANAAC_SWINGV_LOWEST;
+  return PANAAC_SWINGV_AUTO;
+}
+
+inline const char *swing_h_pos_to_str(SwingHPos pos) {
+  switch (pos) {
+    case PANAAC_SWINGH_LEFTMAX:
+      return STR_SWINGH_LEFTMAX;
+    case PANAAC_SWINGH_LEFT:
+      return STR_SWINGH_LEFT;
+    case PANAAC_SWINGH_MIDDLE:
+      return STR_SWINGH_MIDDLE;
+    case PANAAC_SWINGH_RIGHT:
+      return STR_SWINGH_RIGHT;
+    case PANAAC_SWINGH_RIGHTMAX:
+      return STR_SWINGH_RIGHTMAX;
+    case PANAAC_SWINGH_AUTO:
+      return STR_SWINGH_AUTO;
+    default:
+      return nullptr;  // not supported / none
+  }
+}
+
+inline SwingHPos swing_h_pos_from_str(const char *value) {
+  if (strcmp(value, STR_SWINGH_LEFTMAX) == 0)
+    return PANAAC_SWINGH_LEFTMAX;
+  if (strcmp(value, STR_SWINGH_LEFT) == 0)
+    return PANAAC_SWINGH_LEFT;
+  if (strcmp(value, STR_SWINGH_MIDDLE) == 0)
+    return PANAAC_SWINGH_MIDDLE;
+  if (strcmp(value, STR_SWINGH_RIGHT) == 0)
+    return PANAAC_SWINGH_RIGHT;
+  if (strcmp(value, STR_SWINGH_RIGHTMAX) == 0)
+    return PANAAC_SWINGH_RIGHTMAX;
+  if (strcmp(value, STR_SWINGH_AUTO) == 0)
+    return PANAAC_SWINGH_AUTO;
+  return PANAAC_SWINGH_NONE;
+}
+
+inline const char *mode_to_str(Mode mode) {
+  switch (mode) {
+    case MODE_COOL:
+      return "cool";
+    case MODE_HEAT:
+      return "heat";
+    case MODE_FAN_ONLY:
+      return "fan_only";
+    case MODE_DRY:
+      return "dry";
+    case MODE_AUTO:
+      return "auto";
+    default:
+      return "off";
+  }
+}
+
+inline Mode mode_from_str(const char *value) {
+  if (strcasecmp(value, "cool") == 0)
+    return MODE_COOL;
+  if (strcasecmp(value, "heat") == 0)
+    return MODE_HEAT;
+  if (strcasecmp(value, "fan_only") == 0)
+    return MODE_FAN_ONLY;
+  if (strcasecmp(value, "dry") == 0)
+    return MODE_DRY;
+  if (strcasecmp(value, "auto") == 0)
+    return MODE_AUTO;
+  return MODE_OFF;
+}
+
+// PanaAC Mode enum values are intentionally identical to climate::ClimateMode.
+inline climate::ClimateMode mode_to_climate_mode(Mode mode) {
+  return static_cast<climate::ClimateMode>(mode);
+}
+inline Mode climate_mode_to_mode(climate::ClimateMode mode) {
+  return static_cast<Mode>(mode);
+}
+
+}  // namespace esphome::panaac_v2
