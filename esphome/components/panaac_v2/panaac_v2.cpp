@@ -105,6 +105,18 @@ climate::ClimateTraits PanaACV2Climate::traits() {
 
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
 
+  // Advertise the standard fan-mode enums whose names collide with our custom fan-mode
+  // strings ("Auto", "Quiet"). ClimateCall::set_fan_mode(const char*, len) matches standard
+  // enum strings BEFORE custom fan modes, so an MQTT "set" command with fan_mode "Auto" or
+  // "Quiet" is parsed as CLIMATE_FAN_AUTO / CLIMATE_FAN_QUIET. Without these advertised in
+  // traits, validate_() rejects them ("Fan Mode Auto/Quiet not supported") and control() never
+  // runs. The control() switch below already maps these enums to the Panasonic fan levels, so
+  // advertising them here completes that path. "Level 1".."Level 5" don't collide with standard
+  // strings and resolve to custom fan modes as before.
+  traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
+  if (this->supports_quiet_)
+    traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+
   traits.set_visual_min_temperature(PANAAC_TEMP_MIN);
   traits.set_visual_max_temperature(PANAAC_TEMP_MAX);
   traits.set_visual_target_temperature_step(this->temp_step_);
