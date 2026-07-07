@@ -84,11 +84,6 @@ void PanaACV2Climate::loop() {
   if (!this->is_connected())
     return;
 
-  if (!this->availability_published_) {
-    this->publish_availability_("online");
-    this->availability_published_ = true;
-  }
-
   if (!this->traits_published_) {
     this->publish_traits_();
     this->traits_published_ = true;
@@ -259,10 +254,6 @@ bool PanaACV2Climate::set_swing_horizontal_mode_if_supported_(const char *mode) 
 }
 
 // ---------------- MQTT publish helpers ----------------
-
-void PanaACV2Climate::publish_availability_(const std::string &payload) {
-  this->publish(this->availability_topic_(), payload, 0, true);
-}
 
 void PanaACV2Climate::publish_state_() {
   this->publish_json(this->state_topic_(), [this](JsonObject root) {

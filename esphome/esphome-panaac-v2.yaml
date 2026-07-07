@@ -33,11 +33,21 @@ wifi:
 captive_portal:
 
 # MQTT broker (the same broker used by Home Assistant).
+# Availability is driven by birth/last-will on the panaac_v2 availability topic so the
+# PanaAC v2 HA integration reliably sees online/offline (incl. broker restart / device crash).
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_user
   password: !secret mqtt_pass
   discovery: false
+  birth_message:
+    topic: "panaac_v2/${device_name}/availability"
+    payload: "online"
+    retain: true
+  will_message:
+    topic: "panaac_v2/${device_name}/availability"
+    payload: "offline"
+    retain: true
 
 # Non-invasive wiring: separate IR receiver and IR LED.
 #   GPIO14 = D5  <- IR receiver (TSOP38xxx) data pin
@@ -73,6 +83,10 @@ panaac_v2:
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
   topic_prefix: "panaac_v2/${device_name}"
+  # The climate entity lives in the PanaAC v2 HA integration (over MQTT). Keep the
+  # on-device Climate surface (lambdas/on_state/restore_state) but hide this entity from
+  # the native API and MQTT discovery so HA only ever sees the custom-integration climate.
+  internal: true
   supports_cool: true
   supports_heat: true
   supports_fan_only: true

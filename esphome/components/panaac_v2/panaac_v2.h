@@ -83,7 +83,6 @@ class PanaACV2Climate : public climate::Climate,
 
   void publish_state_();
   void publish_traits_();
-  void publish_availability_(const std::string &payload);
 
   void on_set_json_(const std::string &topic, JsonObject root);
 
@@ -97,7 +96,6 @@ class PanaACV2Climate : public climate::Climate,
   std::string state_topic_() const { return this->topic_prefix_ + "/state"; }
   std::string traits_topic_() const { return this->topic_prefix_ + "/traits"; }
   std::string set_topic_() const { return this->topic_prefix_ + "/set"; }
-  std::string availability_topic_() const { return this->topic_prefix_ + "/availability"; }
 
   std::string topic_prefix_{"panaac_v2/panaac_v2"};
 
@@ -119,7 +117,6 @@ class PanaACV2Climate : public climate::Climate,
   SwingVPos last_swing_v_pos_{PANAAC_SWINGV_MIDDLE};
   SwingHPos last_swing_h_pos_{PANAAC_SWINGH_MIDDLE};
 
-  bool availability_published_{false};
   bool traits_published_{false};
 };
 
