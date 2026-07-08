@@ -42,13 +42,17 @@ namespace esphome::panaac_v2 {
  * - **v1 native mode** (`topic_prefix` unset, `mqtt_enabled_ = false`): a normal native climate
  *   (standard fan/swing enums, visible on the ESPHome API / standard MQTT discovery) plus three
  *   companion `select` entities (Fan Level / Swing Vertical / Swing Horizontal) that give the
- *   full Panasonic granularity. Behaves like PanaAC v1 (+ issue #15 grouping). No MQTT broker
- *   is required — all MQTT code is compiled out (`USE_MQTT` undefined).
+ *   full Panasonic granularity. Behaves like PanaAC v1. No MQTT broker is required — all MQTT
+ *   code is compiled out (`USE_MQTT` undefined). The climate + selects sit at the root of the
+ *   ESPHome device, like PanaAC v1 (optionally regrouped under a `device_id` sub-device).
  * - **v2 MQTT mode** (`topic_prefix` set, `mqtt_enabled_ = true`, requires a `mqtt:` block so
- *   `USE_MQTT` is defined): the climate is `internal` (hidden from the native API / standard
- *   discovery) and is exposed over the custom `<prefix>/state|traits|availability|set` MQTT
- *   JSON topics consumed by the PanaAC v2 HA custom integration (single all-in-one climate
- *   card). The same three `(PanaAC v1)` selects are also created for granular native control.
+ *   `USE_MQTT` is defined): the climate is exposed over the custom
+ *   `<prefix>/state|traits|availability|set` MQTT JSON topics consumed by the PanaAC v2 HA custom
+ *   integration (the single all-in-one v2 climate card). It is ALSO kept visible on the native
+ *   API as a "(PanaAC v1)" climate — standard swing modes + custom fan-level strings + the same
+ *   three `(PanaAC v1)` selects — at the root of the ESPHome device, exactly like PanaAC v1. The
+ *   custom MQTT topics are independent of the native ClimateTraits (publish_traits_() is
+ *   hand-rolled JSON), so the v2 HA-integration card is unaffected by the visible native climate.
  *
  * `ac_state` is the single source of truth; the Climate base fields and (in v2 mode) the custom
  * fan/swing strings are derived from it via `sync_to_climate_()`.

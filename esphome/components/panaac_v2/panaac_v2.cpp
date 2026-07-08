@@ -217,6 +217,13 @@ climate::ClimateTraits PanaACV2Climate::traits() {
     traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
     if (this->supports_quiet_)
       traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+    // The visible "(PanaAC v1)" climate card also carries the standard swing modes (just like
+    // PanaAC v1); the granular swing POSITIONS stay on the three selects / the v2 MQTT topics.
+    traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL});
+    if (this->swing_horizontal_) {
+      traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
+      traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
+    }
   } else {
     // v1: standard fan enum only (lossy; L2/L4 reachable via the Fan Level select).
     traits.set_supported_fan_modes({climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM,
@@ -268,6 +275,10 @@ void PanaACV2Climate::sync_to_climate_() {
     this->set_custom_fan_mode_(fan_str, strlen(fan_str));
     this->custom_swing_mode_ = swing_v_pos_to_str(ac_state.swing_v_pos);
     this->swing_horizontal_mode_ = this->swing_horizontal_ ? swing_h_pos_to_str(ac_state.swing_h_pos) : nullptr;
+    // The visible "(PanaAC v1)" climate card advertises the standard swing modes, so mirror
+    // ac_state.swing_mode (derived from the v/h positions by recompute_swing_mode_()) into the
+    // Climate base field so the card reflects the current swing state.
+    this->swing_mode = ac_state.swing_mode;
   } else {
     this->fan_mode = ac_state.fan_mode;
     this->swing_mode = ac_state.swing_mode;
@@ -384,54 +395,55 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_swing_mode().has_value()) {
-    if (this->mqtt_enabled_) {
-      ESP_LOGW(TAG, "Standard swing modes are not supported in v2 mode; use the MQTT set topic or the selects");
-    } else {
-      auto sm = *call.get_swing_mode();
-      this->ac_state.swing_mode = sm;
-      switch (sm) {
-        case climate::CLIMATE_SWING_OFF:
-          if (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO)
-            this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
-          if (this->swing_horizontal_) {
-            if (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO)
-              this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
-          } else {
-            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
-          }
-          break;
-        case climate::CLIMATE_SWING_VERTICAL:
-          this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
-          if (this->swing_horizontal_) {
-            if (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO)
-              this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
-          } else {
-            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
-          }
-          break;
-        case climate::CLIMATE_SWING_HORIZONTAL:
-          if (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO)
-            this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
-          if (this->swing_horizontal_) {
-            this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
-          } else {
-            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
-            this->ac_state.swing_mode = climate::CLIMATE_SWING_OFF;
-          }
-          break;
-        case climate::CLIMATE_SWING_BOTH:
-        default:
-          this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
-          if (this->swing_horizontal_) {
-            this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
-          } else {
-            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
-            this->ac_state.swing_mode = climate::CLIMATE_SWING_VERTICAL;
-          }
-          break;
-      }
-      changed = true;
+    // Standard swing modes are handled in BOTH modes — the visible "(PanaAC v1)" climate card
+    // has the same Off/Vertical/Horizontal/Both swing controls as PanaAC v1 (the granular swing
+    // positions still live on the three selects / the v2 MQTT topics). The v2 MQTT set path
+    // never reaches here: it applies the Panasonic swing position strings directly in
+    // on_set_json_() (via set_swing_mode_if_supported_ / set_swing_horizontal_mode_if_supported_).
+    auto sm = *call.get_swing_mode();
+    this->ac_state.swing_mode = sm;
+    switch (sm) {
+      case climate::CLIMATE_SWING_OFF:
+        if (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO)
+          this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
+        if (this->swing_horizontal_) {
+          if (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO)
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
+        } else {
+          this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+        }
+        break;
+      case climate::CLIMATE_SWING_VERTICAL:
+        this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
+        if (this->swing_horizontal_) {
+          if (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO)
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
+        } else {
+          this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+        }
+        break;
+      case climate::CLIMATE_SWING_HORIZONTAL:
+        if (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO)
+          this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
+        if (this->swing_horizontal_) {
+          this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
+        } else {
+          this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+          this->ac_state.swing_mode = climate::CLIMATE_SWING_OFF;
+        }
+        break;
+      case climate::CLIMATE_SWING_BOTH:
+      default:
+        this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
+        if (this->swing_horizontal_) {
+          this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
+        } else {
+          this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+          this->ac_state.swing_mode = climate::CLIMATE_SWING_VERTICAL;
+        }
+        break;
     }
+    changed = true;
   }
 
   if (changed) {

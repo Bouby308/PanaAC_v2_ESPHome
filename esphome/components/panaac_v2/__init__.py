@@ -79,10 +79,12 @@ CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
 
 
 async def _make_select(select_id, config, name, icon, parent):
-    """Create one companion select with the (PanaAC v1) name suffix, an icon, and the climate's
-    device_id (issue #15 grouping). Options are filled at runtime in PanaACV2Climate::setup()."""
+    """Create one companion select with the (PanaAC v1) name suffix, an icon, and (if the
+    climate block set device_id) the same sub-device so it groups with the climate. Options are
+    filled at runtime in PanaACV2Climate::setup(). Without device_id the select sits at the root
+    of the ESPHome device, exactly like PanaAC_ESPHome."""
     cfg = {CONF_ID: select_id, CONF_NAME: name, CONF_ICON: icon, CONF_DISABLED_BY_DEFAULT: False}
-    if CONF_DEVICE_ID in config:  # issue #15: group selects with the climate's (sub-)device
+    if CONF_DEVICE_ID in config:  # optional issue #15 sub-device grouping
         cfg[CONF_DEVICE_ID] = config[CONF_DEVICE_ID]
     sel = cg.new_Pvariable(select_id)
     await select.register_select(sel, cfg, options=[])
@@ -101,6 +103,15 @@ async def to_code(config):
     if mqtt_enabled:
         config.pop(CONF_MQTT_ID, None)
 
+    # Append the "(PanaAC v1)" suffix to the climate name so the on-device climate reads as one
+    # coherent v1 set with its three companion selects ("Fan Level (PanaAC v1)" etc.) and is
+    # never mistaken for the full PanaAC v2 climate card (which in v2 mode comes from the
+    # PanaAC v2 HA custom integration over MQTT). Applied in BOTH modes, before new_climate()
+    # so the entity name and object_id hash both reflect the suffixed name.
+    climate_name = config.get(CONF_NAME) or ""
+    if "(PanaAC v1)" not in climate_name:
+        config[CONF_NAME] = f"{climate_name} (PanaAC v1)".strip()
+
     var = await climate.new_climate(config)
     await cg.register_component(var, config)
     await remote_base.register_listener(var, config)
@@ -109,10 +120,12 @@ async def to_code(config):
     cg.add(var.set_mqtt_enabled(mqtt_enabled))
     if mqtt_enabled:
         cg.add(var.set_topic_prefix(config[CONF_TOPIC_PREFIX]))
-        # Hide the on-device climate from the native API / standard MQTT discovery so HA only
-        # sees the PanaAC v2 custom-integration climate (over the custom MQTT topics). The
-        # object stays usable by lambdas / restore_state.
-        cg.add(var.set_internal(True))
+        # The on-device "(PanaAC v1)" climate stays VISIBLE on the native API alongside the
+        # three "(PanaAC v1)" selects, at the root of the ESPHome device — exactly like PanaAC
+        # v1. The full-featured PanaAC v2 climate card is still provided by the PanaAC v2 HA
+        # custom integration over the custom MQTT topics below. CONF_MQTT_ID is dropped above so
+        # ESPHome does not ALSO publish a standard MQTT climate component that would duplicate
+        # the HA-integration climate; the native API is the transport for the visible climate.
 
     cg.add(var.set_supports_cool(config[CONF_SUPPORTS_COOL]))
     cg.add(var.set_supports_heat(config[CONF_SUPPORTS_HEAT]))

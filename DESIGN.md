@@ -5,12 +5,18 @@
 This branch unifies PanaAC v1 and v2 behind one component, switched by `topic_prefix`:
 
 - **v1 native mode** (`topic_prefix` unset, `USE_MQTT` undefined): native `climate` (standard
-  fan/swing enums) + three `select` entities (Fan Level / Swing Vertical / Swing Horizontal)
-  over the ESPHome native API / standard MQTT discovery. No broker required. Selects grouped
-  with the climate via `device_id` (issue #15). Behaves like PanaAC v1.
-- **v2 MQTT mode** (`topic_prefix` set, `USE_MQTT` defined): `internal` climate exposed over
-  the custom `<prefix>/...` MQTT JSON topics (PanaAC v2 HA custom integration, single card),
-  plus the same three `(PanaAC v1)` selects for granular native control.
+  fan/swing enums, named `"<name> (PanaAC v1)"`) + three `select` entities (Fan Level / Swing
+  Vertical / Swing Horizontal) over the ESPHome native API / standard MQTT discovery. No broker
+  required. Climate + selects sit at the root of the ESPHome device, like PanaAC v1
+  (optionally grouped under a `device_id` sub-device — issue #15).
+- **v2 MQTT mode** (`topic_prefix` set, `USE_MQTT` defined): the full-featured v2 climate is
+  exposed over the custom `<prefix>/...` MQTT JSON topics (PanaAC v2 HA custom integration,
+  single card). The same on-device `"<name> (PanaAC v1)"` climate + three `(PanaAC v1)` selects
+  are ALSO kept visible on the native API, at the root of the ESPHome device — exactly like
+  PanaAC v1. The native climate carries the standard swing modes (Off/Vertical/Horizontal/
+  Both) so its card looks/behaves like PanaAC v1; the granular swing POSITIONS still live on
+  the three selects / the v2 MQTT topics. The custom MQTT topics are independent of the native
+  `ClimateTraits` (`publish_traits_()` is hand-rolled JSON), so the v2 HA card is unaffected.
 
 A canonical `ClimateState ac_state` (mode/temp/fan_level/fan_mode/swing_mode/swing_v_pos/
 swing_h_pos/last_swing_*) is the single source of truth in both modes. The Climate base fields

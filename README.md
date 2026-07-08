@@ -5,18 +5,21 @@ selected by whether you set `topic_prefix` on the `panaac_v2:` block:
 
 - **v1 native mode** (`topic_prefix` omitted) — behaves like the original
   [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome): a native `climate`
-  entity (standard fan/swing enums) plus **three companion `select` entities** — Fan Level,
-  Swing Vertical, Swing Horizontal — that expose the full Panasonic granularity. Exposed via
-  the ESPHome native API (`api:`) and/or standard MQTT discovery. **No MQTT broker is
-  required** — all v2 MQTT code is compiled out (`USE_MQTT` undefined). Includes the
-  [issue #15](https://github.com/hoangminh1109/PanaAC_ESPHome/issues/15) improvement: the
-  selects are grouped with the climate under the same (sub-)device via `device_id`.
+  entity (named `"<name> (PanaAC v1)"`, standard fan/swing enums) plus **three companion
+  `select` entities** — Fan Level, Swing Vertical, Swing Horizontal — that expose the full
+  Panasonic granularity. Exposed via the ESPHome native API (`api:`) and/or standard MQTT
+  discovery. **No MQTT broker is required** — all v2 MQTT code is compiled out (`USE_MQTT`
+  undefined). The climate + selects sit at the root of the ESPHome device, exactly like
+  PanaAC_ESPHome (optionally regroup them under a sub-device via `device_id` —
+  [issue #15](https://github.com/hoangminh1109/PanaAC_ESPHome/issues/15)).
 - **v2 MQTT mode** (`topic_prefix` set, requires a `mqtt:` block) — the original v2 behaviour:
-  the climate is `internal` (hidden from the native API / standard discovery) and is exposed
-  over custom `<prefix>/state|traits|availability|set` MQTT JSON topics consumed by the
+  the full-featured climate is exposed over custom `<prefix>/state|traits|availability|set`
+  MQTT JSON topics consumed by the
   [PanaAC v2 HA custom integration](https://github.com/hoangminh1109/PanaAC_v2_HA), showing
   every fan level / swing position / horizontal-swing axis on a single climate card. The same
-  three `(PanaAC v1)` selects are also created for granular native control.
+  on-device `"<name> (PanaAC v1)"` climate + three `(PanaAC v1)` selects are **also kept visible**
+  on the native API, at the root of the ESPHome device — exactly like PanaAC v1 (the v2 HA
+  integration's climate is a separate device).
 
 The IR encode/decode core and the canonical `ac_state` are shared between both modes.
 
@@ -37,9 +40,10 @@ Created in **both** modes (named with a `(PanaAC v1)` suffix):
 | Swing Vertical (PanaAC v1) | Auto, Highest, High, Middle, Low, Lowest |
 | Swing Horizontal (PanaAC v1) | Auto, Left Max, Left, Middle, Right, Right Max (when `swing_horizontal`) |
 
-Set `device_id` on the `panaac_v2:` block (and define the sub-device under `esphome.devices`)
-to group all three selects — and in v1 mode the climate — under one device in the ESPHome
-WebUI / Home Assistant (issue #15).
+By default the climate and the three selects sit at the root of the ESPHome device (no
+sub-device), exactly like PanaAC_ESPHome. Optionally set `device_id` on the `panaac_v2:` block
+(and define the sub-device under `esphome.devices`) to regroup them under a named sub-device
+in the ESPHome WebUI / Home Assistant (issue #15).
 
 ## v2 MQTT topics
 

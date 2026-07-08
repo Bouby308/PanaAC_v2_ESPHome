@@ -7,12 +7,6 @@ esphome:
   friendly_name: "${device_friendlyname}"
   min_version: 2025.9.0
   name_add_mac_suffix: false
-  # Sub-device so the three (PanaAC v1) selects group together (issue #15). The climate itself
-  # is internal in v2 mode (hidden); the visible climate comes from the PanaAC v2 HA custom
-  # integration over the custom MQTT topics.
-  devices:
-    - id: hvac
-      name: HVAC
 
 # Load the panaac_v2 custom component from the sibling components/ folder.
 external_components:
@@ -25,8 +19,9 @@ esp8266:
 # Enable logging
 logger:
 
-# Native Home Assistant API — exposes the three (PanaAC v1) selects (the climate itself is
-# internal in v2 mode and comes from the PanaAC v2 HA custom integration over MQTT).
+# Native Home Assistant API — exposes the "(PanaAC v1)" climate and the three "(PanaAC v1)"
+# selects at the root of the ESPHome device, exactly like PanaAC v1. The full-featured v2 climate
+# card comes from the PanaAC v2 HA custom integration over MQTT (separate device).
 api:
 
 # Allow Over-The-Air updates
@@ -49,10 +44,12 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_user
   password: !secret mqtt_pass
-  # Discovery is OFF: the climate is internal (hidden) and exposed via the PanaAC v2 HA custom
-  # integration over the panaac_v2/<prefix>/... topics. The three (PanaAC v1) selects are
-  # exposed via the native API (see `api:` above) — ESPHome only MQTT-discovers platform
-  # entities, not programmatically-created selects, so the native API is their transport.
+  # Discovery is OFF: the full-featured v2 climate is exposed via the PanaAC v2 HA custom
+  # integration over the panaac_v2/<prefix>/... topics (not via standard MQTT discovery, which
+  # would create a duplicate climate). The "(PanaAC v1)" climate and the three "(PanaAC v1)"
+  # selects are exposed via the native API (see `api:` above) — ESPHome only MQTT-discovers
+  # platform entities, not programmatically-created selects, so the native API is their
+  # transport.
   discovery: false
   birth_message:
     topic: "panaac_v2/${device_name}/availability"
@@ -104,12 +101,13 @@ panaac_v2:
   id: panaac_v2_climate
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
-  # Setting topic_prefix enables v2 MQTT mode: the climate is exposed over the custom
-  # panaac_v2/<prefix>/... MQTT JSON topics (consumed by the PanaAC v2 HA custom integration)
-  # and hidden from the native API / standard MQTT discovery (the component sets internal).
-  # The three (PanaAC v1) selects are still created alongside it.
+  # Setting topic_prefix enables v2 MQTT mode: the full-featured v2 climate is exposed over the
+  # custom panaac_v2/<prefix>/... MQTT JSON topics (consumed by the PanaAC v2 HA custom
+  # integration). The "(PanaAC v1)" climate and the three "(PanaAC v1)" selects are ALSO created
+  # and kept visible on the native API, at the root of the ESPHome device (no sub-device),
+  # exactly like PanaAC v1. The v2 custom topics are independent of the native ClimateTraits, so
+  # the v2 HA card is unaffected.
   topic_prefix: "panaac_v2/${device_name}"
-  device_id: hvac
   supports_cool: true
   supports_heat: true
   supports_fan_only: true

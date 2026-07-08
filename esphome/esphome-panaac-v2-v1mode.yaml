@@ -7,11 +7,6 @@ esphome:
   friendly_name: "${device_friendlyname}"
   min_version: 2025.9.0
   name_add_mac_suffix: false
-  # Sub-devices (ESPHome >= 2025.9). The climate + the three (PanaAC v1) selects all reference
-  # device_id: hvac so they group together in the ESPHome WebUI and Home Assistant (issue #15).
-  devices:
-    - id: hvac
-      name: HVAC
 
 # Load the panaac_v2 custom component from the sibling components/ folder.
 external_components:
@@ -73,12 +68,14 @@ sensor:
     device_class: temperature
 
 # v1 native mode: NO topic_prefix. The component behaves like PanaAC v1 — a native climate
-# (standard fan/swing enums) plus the three (PanaAC v1) selects (Fan Level / Swing Vertical /
-# Swing Horizontal), all grouped under the HVAC sub-device (issue #15).
+# (standard fan/swing enums, named "<name> (PanaAC v1)") plus the three (PanaAC v1) selects
+# (Fan Level / Swing Vertical / Swing Horizontal), all at the root of the ESPHome device (no
+# sub-device), exactly like PanaAC_ESPHome. The "(PanaAC v1)" name suffix is added by the
+# component in both modes. (Optionally set `device_id` + an `esphome.devices` sub-device to
+# regroup them under a named sub-device — issue #15.)
 panaac_v2:
   name: "Remote Controller"
   id: panaac_v2_climate
-  device_id: hvac
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
   supports_cool: true

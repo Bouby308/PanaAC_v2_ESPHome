@@ -4,15 +4,19 @@
 
 This component has two modes, picked by whether you set `topic_prefix`:
 
-- **v1 native mode** — omit `topic_prefix`. Native `climate` + three `select` entities via the
-  ESPHome native API (`api:`) / standard MQTT discovery. **No MQTT broker required.** Use
-  `esphome/esphome-panaac-v2-v1mode.yaml` as the starting point. Behaves like PanaAC v1.
-- **v2 MQTT mode** — set `topic_prefix` and add a `mqtt:` block. The climate is exposed over
-  the custom MQTT JSON topics (PanaAC v2 HA custom integration, single all-in-one card); the
-  three `(PanaAC v1)` selects are also created. Use `esphome/esphome-panaac-v2.yaml`.
+- **v1 native mode** — omit `topic_prefix`. Native `climate` (named `"<name> (PanaAC v1)"`) +
+  three `select` entities via the ESPHome native API (`api:`) / standard MQTT discovery. **No
+  MQTT broker required.** Use `esphome/esphome-panaac-v2-v1mode.yaml` as the starting point.
+  Behaves like PanaAC v1.
+- **v2 MQTT mode** — set `topic_prefix` and add a `mqtt:` block. The full-featured climate is
+  exposed over the custom MQTT JSON topics (PanaAC v2 HA custom integration, single all-in-one
+  card); the on-device `"<name> (PanaAC v1)"` climate + three `(PanaAC v1)` selects are **also
+  kept visible** on the native API. Use `esphome/esphome-panaac-v2.yaml`.
 
-In both modes the three `(PanaAC v1)` selects are created; set `device_id` (and define the
-sub-device under `esphome.devices`) to group them with the climate (issue #15).
+In both modes the `"<name> (PanaAC v1)"` climate and the three `(PanaAC v1)` selects are
+created at the root of the ESPHome device, exactly like PanaAC_ESPHome. Optionally set
+`device_id` (and define the sub-device under `esphome.devices`) to regroup them under a named
+sub-device (issue #15).
 
 ## What you need
 
