@@ -448,9 +448,13 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
 
   if (changed) {
     this->sync_to_climate_();
-    this->transmit_data_();
+    // Publish state BEFORE the (blocking ~260 ms) IR transmit so Home Assistant's climate entity
+    // reflects the change immediately; the physical IR send follows. transmit_data_() busy-waits
+    // with interrupts disabled for the whole signal, so any publish after it would lag by the
+    // full signal duration (the main lag the user saw).
     this->publish_state_by_mode_();
     this->update_selects_();
+    this->transmit_data_();
   }
 }
 
@@ -482,9 +486,9 @@ void PanaACV2Climate::apply_fan_select_(FanLevel level) {
   this->ac_state.fan_level = level;
   this->ac_state.fan_mode = fan_level_to_standard(level);
   this->sync_to_climate_();
-  this->transmit_data_();
-  this->publish_state_by_mode_();
+  this->publish_state_by_mode_();  // reflect before the blocking IR send
   this->update_selects_();
+  this->transmit_data_();
 }
 
 void PanaACV2Climate::apply_swingv_select_(SwingVPos pos) {
@@ -493,9 +497,9 @@ void PanaACV2Climate::apply_swingv_select_(SwingVPos pos) {
     this->ac_state.last_swing_v_pos = pos;
   this->recompute_swing_mode_();
   this->sync_to_climate_();
-  this->transmit_data_();
-  this->publish_state_by_mode_();
+  this->publish_state_by_mode_();  // reflect before the blocking IR send
   this->update_selects_();
+  this->transmit_data_();
 }
 
 void PanaACV2Climate::apply_swingh_select_(SwingHPos pos) {
@@ -504,9 +508,9 @@ void PanaACV2Climate::apply_swingh_select_(SwingHPos pos) {
     this->ac_state.last_swing_h_pos = pos;
   this->recompute_swing_mode_();
   this->sync_to_climate_();
-  this->transmit_data_();
-  this->publish_state_by_mode_();
+  this->publish_state_by_mode_();  // reflect before the blocking IR send
   this->update_selects_();
+  this->transmit_data_();
 }
 
 // ---------------- v2 MQTT swing set helpers ----------------
@@ -657,9 +661,9 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
 
   if (swing_changed) {
     this->sync_to_climate_();
-    this->transmit_data_();
-    this->publish_state_by_mode_();
+    this->publish_state_by_mode_();  // reflect before the blocking IR send
     this->update_selects_();
+    this->transmit_data_();
   }
 }
 #endif  // USE_MQTT

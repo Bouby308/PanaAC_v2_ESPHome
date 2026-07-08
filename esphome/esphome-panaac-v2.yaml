@@ -31,6 +31,10 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # Keep the ESP8266 radio awake. With the default (modem sleep) the first command after an idle
+  # period waits ~1 s for the radio to wake on the next DTIM beacon — the lag the user saw. NONE
+  # trades a little idle power for sub-second command responsiveness (this device is USB-powered).
+  power_save_mode: NONE
   ap:
     ssid: "${device_name}-ap"
     password: !secret wifi_ap_password

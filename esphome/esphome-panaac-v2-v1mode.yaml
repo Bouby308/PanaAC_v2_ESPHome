@@ -29,6 +29,10 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  # Keep the ESP8266 radio awake so the first command after an idle period isn't delayed ~1 s by
+  # modem-sleep wake (DTIM). NONE trades a little idle power for sub-second responsiveness
+  # (this device is USB-powered).
+  power_save_mode: NONE
   ap:
     ssid: "${device_name}-ap"
     password: !secret wifi_ap_password
