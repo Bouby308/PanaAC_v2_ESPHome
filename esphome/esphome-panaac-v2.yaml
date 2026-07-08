@@ -48,6 +48,14 @@ mqtt:
     topic: "panaac_v2/${device_name}/availability"
     payload: "offline"
     retain: true
+  # Published by ESPHome on a GRACEFUL shutdown (reboot / OTA / safe mode) right before the
+  # clean MQTT disconnect. The broker does NOT send the last-will on a clean disconnect, so
+  # without this HA would keep seeing "online" while the device is down. Hard crashes / power
+  # loss / WiFi drops are still caught by the last-will above (after keepalive timeout).
+  shutdown_message:
+    topic: "panaac_v2/${device_name}/availability"
+    payload: "offline"
+    retain: true
 
 # Non-invasive wiring: separate IR receiver and IR LED.
 #   GPIO14 = D5  <- IR receiver (TSOP38xxx) data pin

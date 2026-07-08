@@ -314,7 +314,7 @@ void PanaACV2Climate::publish_state_() {
     if (!std::isnan(this->current_temperature))
       root["current_temperature"] = this->current_temperature;
     root["available"] = true;
-  });
+  }, 0, true);
 
   // Fire the Climate on_state trigger and save state.
   this->publish_state();
