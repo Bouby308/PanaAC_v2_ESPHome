@@ -34,10 +34,14 @@ void PanaACV2Climate::setup() {
 
   // Register the arbitrary Panasonic fan/swing strings as Climate custom modes.
   // Note: set_supported_custom_fan_modes() replaces the whole list, so build one vector.
+  // A 3-level AC exposes Level 1/3/5 (low/medium/high); a 5-level AC adds the intermediate
+  // Level 2 and Level 4. Level 3 is always available.
   std::vector<const char *> fan_modes = {STR_FAN_AUTO, STR_FAN_L1};
-  if (this->fan_5level_) {
-    fan_modes.insert(fan_modes.end(), {STR_FAN_L2, STR_FAN_L3, STR_FAN_L4});
-  }
+  if (this->fan_5level_)
+    fan_modes.push_back(STR_FAN_L2);
+  fan_modes.push_back(STR_FAN_L3);
+  if (this->fan_5level_)
+    fan_modes.push_back(STR_FAN_L4);
   fan_modes.push_back(STR_FAN_L5);
   if (this->supports_quiet_) {
     fan_modes.push_back(STR_FAN_QUIET);
@@ -329,14 +333,15 @@ void PanaACV2Climate::publish_traits_() {
     hvac_modes.add("dry");
     hvac_modes.add("auto");
 
+    // 3-level ACs expose Level 1/3/5; 5-level ACs add Level 2 and 4 (see setup()).
     JsonArray fan_modes = root["fan_modes"].to<JsonArray>();
     fan_modes.add(STR_FAN_AUTO);
     fan_modes.add(STR_FAN_L1);
-    if (this->fan_5level_) {
+    if (this->fan_5level_)
       fan_modes.add(STR_FAN_L2);
-      fan_modes.add(STR_FAN_L3);
+    fan_modes.add(STR_FAN_L3);
+    if (this->fan_5level_)
       fan_modes.add(STR_FAN_L4);
-    }
     fan_modes.add(STR_FAN_L5);
     if (this->supports_quiet_)
       fan_modes.add(STR_FAN_QUIET);
@@ -706,8 +711,16 @@ bool PanaACV2Climate::decode_and_apply_(std::span<const uint8_t> state_bytes) {
     if ((state_bytes[PANAAC_BYTEPOS_QUIET] & 0xF0) == PANAAC_FAN_QUIET)
       fan_level = PANAAC_FAN_QUIET;
   }
-  const char *fan_str = fan_level_to_str(fan_level);
-  this->set_custom_fan_mode_(fan_str, strlen(fan_str));
+  // A 3-level AC cannot represent Level 2/4. Discard those and leave the current fan mode
+  // unchanged — calling set_custom_fan_mode_() with an unregistered mode would null the
+  // custom fan mode (Climate::set_custom_mode clears it), which publish_state_() then
+  // renders as "Auto" in the UI. Skip the call entirely so the UI keeps its last value.
+  if ((fan_level == PANAAC_FAN_LEVEL_2 || fan_level == PANAAC_FAN_LEVEL_4) && !this->fan_5level_) {
+    ESP_LOGV(TAG, "Fan level %s requires 5-level support; ignoring", fan_level_to_str(fan_level));
+  } else {
+    const char *fan_str = fan_level_to_str(fan_level);
+    this->set_custom_fan_mode_(fan_str, strlen(fan_str));
+  }
 
   // swing
   uint8_t swing_v = state_bytes[PANAAC_BYTEPOS_SWINGV] & 0x0F;
