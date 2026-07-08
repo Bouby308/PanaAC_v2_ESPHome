@@ -101,6 +101,23 @@ enum SwingHPos : uint8_t {
   PANAAC_SWINGH_AUTO = 0x0D,
 };
 
+/// Canonical Panasonic AC state — the single source of truth shared by the climate entity,
+/// the 3 companion selects, the IR encoder/decoder, and (in v2 mode) the MQTT JSON publish.
+/// Modeled on PanaAC v1's `ClimateState`. The Climate base fields (`mode`,
+/// `target_temperature`, `fan_mode`/`custom_fan_mode`, `swing_mode`/custom swing strings) are
+/// derived from this via `sync_to_climate_()`.
+struct ClimateState {
+  climate::ClimateMode mode;
+  float temp;
+  climate::ClimateFanMode fan_mode;
+  FanLevel fan_level;
+  climate::ClimateSwingMode swing_mode;
+  SwingVPos swing_v_pos;
+  SwingHPos swing_h_pos;
+  SwingVPos last_swing_v_pos;
+  SwingHPos last_swing_h_pos;
+};
+
 static const char *const STR_FAN_AUTO = "Auto";
 static const char *const STR_FAN_L1 = "Level 1";
 static const char *const STR_FAN_L2 = "Level 2";

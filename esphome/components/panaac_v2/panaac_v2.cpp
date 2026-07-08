@@ -19,80 +19,181 @@
 #include <array>
 #include <cstdio>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <vector>
 
 namespace esphome::panaac_v2 {
 
+namespace {
+// Map a granular FanLevel to the lossy standard ClimateFanMode enum (climate card in v1 mode).
+inline climate::ClimateFanMode fan_level_to_standard(FanLevel level) {
+  switch (level) {
+    case PANAAC_FAN_LEVEL_1:
+    case PANAAC_FAN_LEVEL_2:
+      return climate::CLIMATE_FAN_LOW;
+    case PANAAC_FAN_LEVEL_3:
+    case PANAAC_FAN_LEVEL_4:
+      return climate::CLIMATE_FAN_MEDIUM;
+    case PANAAC_FAN_LEVEL_5:
+      return climate::CLIMATE_FAN_HIGH;
+    case PANAAC_FAN_QUIET:
+      return climate::CLIMATE_FAN_QUIET;
+    case PANAAC_FAN_AUTO:
+    default:
+      return climate::CLIMATE_FAN_AUTO;
+  }
+}
+}  // namespace
+
 PanaACV2Climate::PanaACV2Climate() {
   this->target_temperature = 24.0f;
+  this->ac_state.mode = climate::CLIMATE_MODE_OFF;
+  this->ac_state.temp = 24.0f;
+  this->ac_state.fan_mode = climate::CLIMATE_FAN_AUTO;
+  this->ac_state.fan_level = PANAAC_FAN_AUTO;
+  this->ac_state.swing_mode = climate::CLIMATE_SWING_OFF;
+  this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
+  this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
+  this->ac_state.last_swing_v_pos = PANAAC_SWINGV_MIDDLE;
+  this->ac_state.last_swing_h_pos = PANAAC_SWINGH_MIDDLE;
 }
+
+// ---------------- setup / loop ----------------
 
 void PanaACV2Climate::setup() {
   ESP_LOGCONFIG(TAG, "Setting up PanaAC v2 '%s'", this->get_name().c_str());
-  ESP_LOGCONFIG(TAG, "  Topic prefix: %s", this->topic_prefix_.c_str());
+  ESP_LOGCONFIG(TAG, "  Mode: %s", this->mqtt_enabled_ ? "v2 MQTT" : "v1 native");
+  if (this->mqtt_enabled_)
+    ESP_LOGCONFIG(TAG, "  Topic prefix: %s", this->topic_prefix_.c_str());
 
-  // Register the arbitrary Panasonic fan/swing strings as Climate custom modes.
-  // Note: set_supported_custom_fan_modes() replaces the whole list, so build one vector.
-  // A 3-level AC exposes Level 1/3/5 (low/medium/high); a 5-level AC adds the intermediate
-  // Level 2 and Level 4. Level 3 is always available.
-  std::vector<const char *> fan_modes = {STR_FAN_AUTO, STR_FAN_L1};
-  if (this->fan_5level_)
-    fan_modes.push_back(STR_FAN_L2);
-  fan_modes.push_back(STR_FAN_L3);
-  if (this->fan_5level_)
-    fan_modes.push_back(STR_FAN_L4);
-  fan_modes.push_back(STR_FAN_L5);
-  if (this->supports_quiet_) {
-    fan_modes.push_back(STR_FAN_QUIET);
-  }
-  this->set_supported_custom_fan_modes(fan_modes);
-
-  // Initialize defaults.
-  this->set_custom_fan_mode_(STR_FAN_AUTO, strlen(STR_FAN_AUTO));
-  this->custom_swing_mode_ = STR_SWINGV_MIDDLE;
-  if (this->swing_horizontal_) {
-    this->swing_horizontal_mode_ = STR_SWINGH_MIDDLE;
-  } else {
-    this->swing_horizontal_mode_ = nullptr;
+  // v2 mode registers the arbitrary Panasonic fan-level strings as Climate custom fan modes
+  // (the single all-in-one MQTT climate card). v1 mode uses only the standard fan enum.
+  if (this->mqtt_enabled_) {
+    // A 3-level AC exposes Level 1/3/5 (low/medium/high); a 5-level AC adds Level 2 and 4.
+    std::vector<const char *> fan_modes = {STR_FAN_AUTO, STR_FAN_L1};
+    if (this->fan_5level_)
+      fan_modes.push_back(STR_FAN_L2);
+    fan_modes.push_back(STR_FAN_L3);
+    if (this->fan_5level_)
+      fan_modes.push_back(STR_FAN_L4);
+    fan_modes.push_back(STR_FAN_L5);
+    if (this->supports_quiet_)
+      fan_modes.push_back(STR_FAN_QUIET);
+    this->set_supported_custom_fan_modes(fan_modes);
   }
 
-  // Initialize horizontal swing defaults based on feature support.
-  if (!this->swing_horizontal_) {
-    this->last_swing_h_pos_ = PANAAC_SWINGH_NONE;
-  } else {
-    this->last_swing_h_pos_ = PANAAC_SWINGH_MIDDLE;
+  // Fill the companion selects' options at runtime (v1 pattern). Done in BOTH modes so the
+  // selects are functional and MQTT-discoverable in v2 mode too.
+  if (this->fanlevel_ != nullptr) {
+    FixedVector<const char *> fanlevel_options;
+    fanlevel_options.init(7);
+    fanlevel_options.push_back(STR_FAN_AUTO);
+    fanlevel_options.push_back(STR_FAN_L1);
+    if (this->fan_5level_) {
+      fanlevel_options.push_back(STR_FAN_L2);
+      fanlevel_options.push_back(STR_FAN_L3);
+      fanlevel_options.push_back(STR_FAN_L4);
+    } else {
+      fanlevel_options.push_back(STR_FAN_L3);
+    }
+    fanlevel_options.push_back(STR_FAN_L5);
+    if (this->supports_quiet_)
+      fanlevel_options.push_back(STR_FAN_QUIET);
+    this->fanlevel_->traits.set_options(fanlevel_options);
+
+    this->swingv_->traits.set_options(
+        {STR_SWINGV_AUTO, STR_SWINGV_HIGHEST, STR_SWINGV_HIGH, STR_SWINGV_MIDDLE, STR_SWINGV_LOW, STR_SWINGV_LOWEST});
+    if (this->swing_horizontal_ && this->swingh_ != nullptr) {
+      this->swingh_->traits.set_options({STR_SWINGH_AUTO, STR_SWINGH_LEFTMAX, STR_SWINGH_LEFT, STR_SWINGH_MIDDLE,
+                                         STR_SWINGH_RIGHT, STR_SWINGH_RIGHTMAX});
+    }
   }
-  this->last_swing_v_pos_ = PANAAC_SWINGV_MIDDLE;
 
-  this->subscribe_json(this->set_topic_(), &PanaACV2Climate::on_set_json_);
-
+  // v2 mode: subscribe to the MQTT set topic + current-temperature sensor callback.
+  if (this->mqtt_enabled_) {
+#ifdef USE_MQTT
+    this->subscribe_json(this->set_topic_(), &PanaACV2Climate::on_set_json_);
+#endif
+  }
   if (this->sensor_ != nullptr) {
     this->sensor_->add_on_state_callback([this](float state) {
       if (!std::isnan(state)) {
         this->current_temperature = state;
-        this->publish_state_();
+        this->publish_state_by_mode_();
       }
     });
   }
 
-  // Restore previous Climate state (indices reference the supported-mode vectors above).
-  if (auto state = this->restore_state_()) {
+  // Restore previous Climate state (mode/target_temperature/fan_mode/swing_mode) from flash.
+  if (auto state = this->restore_state_())
     state->apply(this);
-  }
 
-  // Publish retained availability + traits once MQTT is up (loop() handles the delay).
+  // Derive canonical ac_state from the restored Climate fields (do NOT transmit on boot — the
+  // AC must not be commanded just because the ESP booted).
+  this->ac_state.mode = this->mode;
+  this->ac_state.temp = this->target_temperature;
+  if (this->has_custom_fan_mode()) {
+    this->ac_state.fan_level = fan_level_from_str(this->get_custom_fan_mode().c_str());
+  } else if (this->fan_mode.has_value()) {
+    switch (this->fan_mode.value()) {
+      case climate::CLIMATE_FAN_LOW:
+        this->ac_state.fan_level = PANAAC_FAN_LEVEL_1;
+        break;
+      case climate::CLIMATE_FAN_MEDIUM:
+        this->ac_state.fan_level = PANAAC_FAN_LEVEL_3;
+        break;
+      case climate::CLIMATE_FAN_HIGH:
+        this->ac_state.fan_level = PANAAC_FAN_LEVEL_5;
+        break;
+      case climate::CLIMATE_FAN_QUIET:
+        this->ac_state.fan_level = this->supports_quiet_ ? PANAAC_FAN_QUIET : PANAAC_FAN_AUTO;
+        break;
+      default:
+        this->ac_state.fan_level = PANAAC_FAN_AUTO;
+        break;
+    }
+  } else {
+    this->ac_state.fan_level = PANAAC_FAN_AUTO;
+    this->fan_mode = climate::CLIMATE_FAN_AUTO;
+  }
+  this->ac_state.fan_mode = fan_level_to_standard(this->ac_state.fan_level);
+
+  // Clamp an unsupported restored swing mode (horizontal not enabled) to a supported one.
+  if (!this->swing_horizontal_ &&
+      (this->swing_mode == climate::CLIMATE_SWING_BOTH || this->swing_mode == climate::CLIMATE_SWING_HORIZONTAL)) {
+    this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+  }
+  this->ac_state.swing_mode = this->swing_mode;
+  bool swing_v_auto =
+      (this->swing_mode == climate::CLIMATE_SWING_VERTICAL || this->swing_mode == climate::CLIMATE_SWING_BOTH);
+  bool swing_h_auto = this->swing_horizontal_ && (this->swing_mode == climate::CLIMATE_SWING_HORIZONTAL ||
+                                                  this->swing_mode == climate::CLIMATE_SWING_BOTH);
+  this->ac_state.swing_v_pos = swing_v_auto ? PANAAC_SWINGV_AUTO : PANAAC_SWINGV_MIDDLE;
+  this->ac_state.swing_h_pos =
+      swing_h_auto ? PANAAC_SWINGH_AUTO : (this->swing_horizontal_ ? PANAAC_SWINGH_MIDDLE : PANAAC_SWINGH_NONE);
+  this->ac_state.last_swing_v_pos = PANAAC_SWINGV_MIDDLE;
+  this->ac_state.last_swing_h_pos = this->swing_horizontal_ ? PANAAC_SWINGH_MIDDLE : PANAAC_SWINGH_NONE;
+
+  // Push the derived state back to the Climate fields / custom strings and the selects (no TX).
+  this->sync_to_climate_();
+  this->update_selects_();
+  if (!this->mqtt_enabled_)
+    this->publish_state();
 }
 
 void PanaACV2Climate::loop() {
+  if (!this->mqtt_enabled_)
+    return;
+#ifdef USE_MQTT
   if (!this->is_connected())
     return;
-
   if (!this->traits_published_) {
     this->publish_traits_();
     this->traits_published_ = true;
     this->publish_state_();
   }
+#endif
 }
 
 climate::ClimateTraits PanaACV2Climate::traits() {
@@ -109,17 +210,25 @@ climate::ClimateTraits PanaACV2Climate::traits() {
 
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
 
-  // Advertise the standard fan-mode enums whose names collide with our custom fan-mode
-  // strings ("Auto", "Quiet"). ClimateCall::set_fan_mode(const char*, len) matches standard
-  // enum strings BEFORE custom fan modes, so an MQTT "set" command with fan_mode "Auto" or
-  // "Quiet" is parsed as CLIMATE_FAN_AUTO / CLIMATE_FAN_QUIET. Without these advertised in
-  // traits, validate_() rejects them ("Fan Mode Auto/Quiet not supported") and control() never
-  // runs. The control() switch below already maps these enums to the Panasonic fan levels, so
-  // advertising them here completes that path. "Level 1".."Level 5" don't collide with standard
-  // strings and resolve to custom fan modes as before.
-  traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
-  if (this->supports_quiet_)
-    traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+  if (this->mqtt_enabled_) {
+    // v2: the custom fan-level strings are registered via set_supported_custom_fan_modes() in
+    // setup(). Also advertise the standard AUTO/QUIET enums whose names collide with our custom
+    // strings so ClimateCall::set_fan_mode("Auto"/"Quiet") passes validate_() (see control()).
+    traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
+    if (this->supports_quiet_)
+      traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+  } else {
+    // v1: standard fan enum only (lossy; L2/L4 reachable via the Fan Level select).
+    traits.set_supported_fan_modes({climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM,
+                                    climate::CLIMATE_FAN_HIGH});
+    if (this->supports_quiet_)
+      traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+    traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL});
+    if (this->swing_horizontal_) {
+      traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
+      traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
+    }
+  }
 
   traits.set_visual_min_temperature(PANAAC_TEMP_MIN);
   traits.set_visual_max_temperature(PANAAC_TEMP_MAX);
@@ -131,7 +240,9 @@ climate::ClimateTraits PanaACV2Climate::traits() {
 void PanaACV2Climate::dump_config() {
   ESP_LOGCONFIG(TAG, "PanaAC v2:");
   LOG_CLIMATE("  ", "Climate", this);
-  ESP_LOGCONFIG(TAG, "  Topic prefix: %s", this->topic_prefix_.c_str());
+  ESP_LOGCONFIG(TAG, "  Mode: %s", this->mqtt_enabled_ ? "v2 MQTT" : "v1 native");
+  if (this->mqtt_enabled_)
+    ESP_LOGCONFIG(TAG, "  Topic prefix: %s", this->topic_prefix_.c_str());
   ESP_LOGCONFIG(TAG, "  Temp step: %.1f", this->temp_step_);
   ESP_LOGCONFIG(TAG, "  Fan 5-level: %s", YESNO(this->fan_5level_));
   ESP_LOGCONFIG(TAG, "  Supports cool: %s", YESNO(this->supports_cool_));
@@ -146,6 +257,44 @@ void PanaACV2Climate::dump_config() {
   }
 }
 
+// ---------------- State synchronization ----------------
+
+void PanaACV2Climate::sync_to_climate_() {
+  this->mode = ac_state.mode;
+  this->target_temperature = ac_state.temp;
+
+  if (this->mqtt_enabled_) {
+    const char *fan_str = fan_level_to_str(ac_state.fan_level);
+    this->set_custom_fan_mode_(fan_str, strlen(fan_str));
+    this->custom_swing_mode_ = swing_v_pos_to_str(ac_state.swing_v_pos);
+    this->swing_horizontal_mode_ = this->swing_horizontal_ ? swing_h_pos_to_str(ac_state.swing_h_pos) : nullptr;
+  } else {
+    this->fan_mode = ac_state.fan_mode;
+    this->swing_mode = ac_state.swing_mode;
+  }
+}
+
+void PanaACV2Climate::update_selects_() {
+  if (this->fanlevel_ != nullptr)
+    this->fanlevel_->set_fanlevel(ac_state.fan_level);
+  if (this->swingv_ != nullptr)
+    this->swingv_->set_swingvpos(ac_state.swing_v_pos);
+  if (this->swing_horizontal_ && this->swingh_ != nullptr)
+    this->swingh_->set_swinghpos(ac_state.swing_h_pos);
+}
+
+void PanaACV2Climate::publish_state_by_mode_() {
+  if (this->mqtt_enabled_) {
+#ifdef USE_MQTT
+    this->publish_state_();
+#else
+    ESP_LOGE(TAG, "v2 MQTT mode requires a mqtt: block (USE_MQTT undefined)");
+#endif
+  } else {
+    this->publish_state();
+  }
+}
+
 // ---------------- Climate control ----------------
 
 void PanaACV2Climate::control(const climate::ClimateCall &call) {
@@ -153,7 +302,6 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
 
   if (call.get_mode().has_value()) {
     auto mode = *call.get_mode();
-    // Reject unsupported modes even though validate_ already checked.
     if (mode == climate::CLIMATE_MODE_HEAT && !this->supports_heat_) {
       ESP_LOGW(TAG, "Heat mode not supported");
       mode = climate::CLIMATE_MODE_OFF;
@@ -166,8 +314,8 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
       ESP_LOGW(TAG, "Cool mode not supported");
       mode = climate::CLIMATE_MODE_OFF;
     }
-    if (this->mode != mode) {
-      this->mode = mode;
+    if (this->ac_state.mode != mode) {
+      this->ac_state.mode = mode;
       changed = true;
     }
   }
@@ -178,36 +326,42 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
       value = PANAAC_TEMP_MIN;
     if (value > PANAAC_TEMP_MAX)
       value = PANAAC_TEMP_MAX;
-    if (this->target_temperature != value) {
-      this->target_temperature = value;
+    if (this->ac_state.temp != value) {
+      this->ac_state.temp = value;
       changed = true;
     }
   }
 
   if (call.has_custom_fan_mode() || call.get_fan_mode().has_value()) {
-    FanLevel level = PANAAC_FAN_AUTO;
+    FanLevel level = this->ac_state.fan_level;  // preserve existing granular level within a group
+    climate::ClimateFanMode std_mode = this->ac_state.fan_mode;
     if (call.has_custom_fan_mode()) {
       level = fan_level_from_str(call.get_custom_fan_mode().c_str());
+      std_mode = fan_level_to_standard(level);
     } else {
-      switch (*call.get_fan_mode()) {
-        case climate::CLIMATE_FAN_AUTO:
-          level = PANAAC_FAN_AUTO;
-          break;
-        case climate::CLIMATE_FAN_QUIET:
-          level = PANAAC_FAN_QUIET;
-          break;
+      std_mode = *call.get_fan_mode();
+      switch (std_mode) {
         case climate::CLIMATE_FAN_LOW:
-          level = PANAAC_FAN_LEVEL_1;
+          if (level != PANAAC_FAN_LEVEL_1 && level != PANAAC_FAN_LEVEL_2)
+            level = PANAAC_FAN_LEVEL_1;
           break;
         case climate::CLIMATE_FAN_MEDIUM:
-          level = PANAAC_FAN_LEVEL_3;
+          if (level != PANAAC_FAN_LEVEL_3 && level != PANAAC_FAN_LEVEL_4)
+            level = PANAAC_FAN_LEVEL_3;
           break;
         case climate::CLIMATE_FAN_HIGH:
           level = PANAAC_FAN_LEVEL_5;
           break;
+        case climate::CLIMATE_FAN_QUIET:
+          if (this->supports_quiet_) {
+            level = PANAAC_FAN_QUIET;
+          } else {
+            level = PANAAC_FAN_AUTO;
+            std_mode = climate::CLIMATE_FAN_AUTO;
+          }
+          break;
+        case climate::CLIMATE_FAN_AUTO:
         default:
-          ESP_LOGW(TAG, "Standard fan mode %s not supported; use custom fan modes",
-                   LOG_STR_ARG(climate_fan_mode_to_string(*call.get_fan_mode())));
           level = PANAAC_FAN_AUTO;
           break;
       }
@@ -215,35 +369,146 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
     if (level == PANAAC_FAN_QUIET && !this->supports_quiet_) {
       ESP_LOGW(TAG, "Quiet fan mode not supported");
       level = PANAAC_FAN_AUTO;
+      std_mode = climate::CLIMATE_FAN_AUTO;
     }
     if ((level == PANAAC_FAN_LEVEL_2 || level == PANAAC_FAN_LEVEL_4) && !this->fan_5level_) {
       ESP_LOGW(TAG, "Fan level %s requires 5-level support", fan_level_to_str(level));
       level = PANAAC_FAN_AUTO;
+      std_mode = climate::CLIMATE_FAN_AUTO;
     }
-    const char *desired = fan_level_to_str(level);
-    if (this->get_custom_fan_mode() != desired) {
-      this->set_custom_fan_mode_(desired, strlen(desired));
+    if (this->ac_state.fan_level != level) {
+      this->ac_state.fan_level = level;
+      this->ac_state.fan_mode = std_mode;
       changed = true;
     }
   }
 
   if (call.get_swing_mode().has_value()) {
-    ESP_LOGW(TAG, "Standard swing modes are not supported; use the panaac_v2 swing services or MQTT commands");
+    if (this->mqtt_enabled_) {
+      ESP_LOGW(TAG, "Standard swing modes are not supported in v2 mode; use the MQTT set topic or the selects");
+    } else {
+      auto sm = *call.get_swing_mode();
+      this->ac_state.swing_mode = sm;
+      switch (sm) {
+        case climate::CLIMATE_SWING_OFF:
+          if (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO)
+            this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
+          if (this->swing_horizontal_) {
+            if (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO)
+              this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
+          } else {
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+          }
+          break;
+        case climate::CLIMATE_SWING_VERTICAL:
+          this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
+          if (this->swing_horizontal_) {
+            if (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO)
+              this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
+          } else {
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+          }
+          break;
+        case climate::CLIMATE_SWING_HORIZONTAL:
+          if (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO)
+            this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
+          if (this->swing_horizontal_) {
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
+          } else {
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+            this->ac_state.swing_mode = climate::CLIMATE_SWING_OFF;
+          }
+          break;
+        case climate::CLIMATE_SWING_BOTH:
+        default:
+          this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
+          if (this->swing_horizontal_) {
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
+          } else {
+            this->ac_state.swing_h_pos = PANAAC_SWINGH_NONE;
+            this->ac_state.swing_mode = climate::CLIMATE_SWING_VERTICAL;
+          }
+          break;
+      }
+      changed = true;
+    }
   }
 
   if (changed) {
-    this->transmit_();
-    this->publish_state_();
+    this->sync_to_climate_();
+    this->transmit_data_();
+    this->publish_state_by_mode_();
+    this->update_selects_();
   }
 }
 
+// Recompute ac_state.swing_mode from the granular v/h positions (used by the selects).
+void PanaACV2Climate::recompute_swing_mode_() {
+  bool v_auto = (this->ac_state.swing_v_pos == PANAAC_SWINGV_AUTO);
+  bool h_auto = this->swing_horizontal_ && (this->ac_state.swing_h_pos == PANAAC_SWINGH_AUTO);
+  if (v_auto && h_auto)
+    this->ac_state.swing_mode = climate::CLIMATE_SWING_BOTH;
+  else if (v_auto)
+    this->ac_state.swing_mode = climate::CLIMATE_SWING_VERTICAL;
+  else if (h_auto)
+    this->ac_state.swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+  else
+    this->ac_state.swing_mode = climate::CLIMATE_SWING_OFF;
+}
+
+// ---------------- Select entry points (both modes) ----------------
+
+void PanaACV2Climate::apply_fan_select_(FanLevel level) {
+  if (level == PANAAC_FAN_QUIET && !this->supports_quiet_) {
+    ESP_LOGW(TAG, "Quiet fan mode not supported");
+    return;
+  }
+  if ((level == PANAAC_FAN_LEVEL_2 || level == PANAAC_FAN_LEVEL_4) && !this->fan_5level_) {
+    ESP_LOGW(TAG, "Fan level %s requires 5-level support", fan_level_to_str(level));
+    return;
+  }
+  this->ac_state.fan_level = level;
+  this->ac_state.fan_mode = fan_level_to_standard(level);
+  this->sync_to_climate_();
+  this->transmit_data_();
+  this->publish_state_by_mode_();
+  this->update_selects_();
+}
+
+void PanaACV2Climate::apply_swingv_select_(SwingVPos pos) {
+  this->ac_state.swing_v_pos = pos;
+  if (pos != PANAAC_SWINGV_AUTO)
+    this->ac_state.last_swing_v_pos = pos;
+  this->recompute_swing_mode_();
+  this->sync_to_climate_();
+  this->transmit_data_();
+  this->publish_state_by_mode_();
+  this->update_selects_();
+}
+
+void PanaACV2Climate::apply_swingh_select_(SwingHPos pos) {
+  this->ac_state.swing_h_pos = pos;
+  if (pos != PANAAC_SWINGH_AUTO)
+    this->ac_state.last_swing_h_pos = pos;
+  this->recompute_swing_mode_();
+  this->sync_to_climate_();
+  this->transmit_data_();
+  this->publish_state_by_mode_();
+  this->update_selects_();
+}
+
+// ---------------- v2 MQTT swing set helpers ----------------
+
+#ifdef USE_MQTT
 bool PanaACV2Climate::set_swing_mode_if_supported_(const char *mode) {
   auto pos = swing_v_pos_from_str(mode);
   const char *desired = swing_v_pos_to_str(pos);
-  if (this->custom_swing_mode_ != desired) {
-    this->custom_swing_mode_ = desired;
+  if (this->ac_state.swing_v_pos != pos) {
+    this->ac_state.swing_v_pos = pos;
     if (pos != PANAAC_SWINGV_AUTO)
-      this->last_swing_v_pos_ = pos;
+      this->ac_state.last_swing_v_pos = pos;
+    this->recompute_swing_mode_();
+    this->custom_swing_mode_ = desired;
     return true;
   }
   return false;
@@ -259,58 +524,29 @@ bool PanaACV2Climate::set_swing_horizontal_mode_if_supported_(const char *mode) 
     ESP_LOGW(TAG, "Unsupported horizontal swing mode: %s", mode);
     return false;
   }
-  const char *desired = swing_h_pos_to_str(pos);
-  if (this->swing_horizontal_mode_ != desired) {
-    this->swing_horizontal_mode_ = desired;
+  if (this->ac_state.swing_h_pos != pos) {
+    this->ac_state.swing_h_pos = pos;
     if (pos != PANAAC_SWINGH_AUTO)
-      this->last_swing_h_pos_ = pos;
+      this->ac_state.last_swing_h_pos = pos;
+    this->recompute_swing_mode_();
+    this->swing_horizontal_mode_ = swing_h_pos_to_str(pos);
     return true;
   }
   return false;
 }
+#endif  // USE_MQTT
 
-// ---------------- MQTT publish helpers ----------------
+// ---------------- MQTT publish helpers (v2 only) ----------------
 
+#ifdef USE_MQTT
 void PanaACV2Climate::publish_state_() {
   this->publish_json(this->state_topic_(), [this](JsonObject root) {
-    root["mode"] = mode_to_str(climate_mode_to_mode(this->mode));
-    root["target_temperature"] = this->target_temperature;
-
-    const char *fan_str = this->get_custom_fan_mode().c_str();
-    if (fan_str == nullptr || strlen(fan_str) == 0) {
-      if (this->fan_mode.has_value()) {
-        switch (this->fan_mode.value()) {
-          case climate::CLIMATE_FAN_QUIET:
-            fan_str = STR_FAN_QUIET;
-            break;
-          case climate::CLIMATE_FAN_LOW:
-            fan_str = STR_FAN_L1;
-            break;
-          case climate::CLIMATE_FAN_MEDIUM:
-            fan_str = STR_FAN_L3;
-            break;
-          case climate::CLIMATE_FAN_HIGH:
-            fan_str = STR_FAN_L5;
-            break;
-          case climate::CLIMATE_FAN_AUTO:
-          default:
-            fan_str = STR_FAN_AUTO;
-            break;
-        }
-      } else {
-        fan_str = STR_FAN_AUTO;
-      }
-    }
-    root["fan_mode"] = fan_str;
-
-    const char *swing_str = this->custom_swing_mode_;
-    if (swing_str == nullptr || strlen(swing_str) == 0)
-      swing_str = STR_SWINGV_AUTO;
-    root["swing_mode"] = swing_str;
-
-    if (this->swing_horizontal_ && this->swing_horizontal_mode_ != nullptr && strlen(this->swing_horizontal_mode_) > 0) {
-      root["swing_horizontal_mode"] = this->swing_horizontal_mode_;
-    }
+    root["mode"] = mode_to_str(climate_mode_to_mode(this->ac_state.mode));
+    root["target_temperature"] = this->ac_state.temp;
+    root["fan_mode"] = fan_level_to_str(this->ac_state.fan_level);
+    root["swing_mode"] = swing_v_pos_to_str(this->ac_state.swing_v_pos);
+    if (this->swing_horizontal_)
+      root["swing_horizontal_mode"] = swing_h_pos_to_str(this->ac_state.swing_h_pos);
     if (!std::isnan(this->current_temperature))
       root["current_temperature"] = this->current_temperature;
     root["available"] = true;
@@ -370,14 +606,16 @@ void PanaACV2Climate::publish_traits_() {
     root["temperature_unit"] = "C";
   }, 0, true);
 }
+#endif  // USE_MQTT
 
-// ---------------- Command handling ----------------
+// ---------------- Command handling (v2 MQTT set) ----------------
 
+#ifdef USE_MQTT
 void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
   ESP_LOGD(TAG, "Received command on %s", topic.c_str());
 
   auto call = this->make_call();
-  bool changed = false;
+  bool swing_changed = false;
 
   if (root["mode"].is<const char *>()) {
     const char *v = root["mode"];
@@ -391,58 +629,59 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
     call.set_fan_mode(v, strlen(v));
   }
 
+  // perform() -> control() applies mode/temp/fan to ac_state and transmits+p publishes if changed.
   call.perform();
 
-  // Panasonic-specific swing strings are handled directly, not through the standard
-  // ClimateCall, because ESPHome's core climate component does not support arbitrary
-  // swing strings.
+  // Panasonic-specific swing strings are handled directly (ESPHome core climate has no custom
+  // swing strings).
   if (root["swing_mode"].is<const char *>()) {
     if (this->set_swing_mode_if_supported_(root["swing_mode"]))
-      changed = true;
+      swing_changed = true;
   }
   if (root["swing_horizontal_mode"].is<const char *>()) {
     if (this->set_swing_horizontal_mode_if_supported_(root["swing_horizontal_mode"]))
-      changed = true;
+      swing_changed = true;
   }
 
-  if (changed) {
-    this->transmit_();
-    this->publish_state_();
+  if (swing_changed) {
+    this->sync_to_climate_();
+    this->transmit_data_();
+    this->publish_state_by_mode_();
+    this->update_selects_();
   }
 }
+#endif  // USE_MQTT
 
 // ---------------- IR transmit ----------------
 
-void PanaACV2Climate::transmit_() {
+void PanaACV2Climate::transmit_data_() {
   static const std::array<uint8_t, 8> FIRST_FRAME = {0x02, 0x20, 0xE0, 0x04, 0x00, 0x00, 0x00, 0x06};
   std::array<uint8_t, 19> second_frame = {0x02, 0x20, 0xE0, 0x04, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00,
-                                            0x00, 0x0E, 0xE0, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00};
-
-  Mode pana_mode = climate_mode_to_mode(this->mode);
+                                          0x00, 0x0E, 0xE0, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00};
 
   // power & mode
-  switch (pana_mode) {
-    case MODE_COOL:
+  switch (this->ac_state.mode) {
+    case climate::CLIMATE_MODE_COOL:
       second_frame[PANAAC_BYTEPOS_POWER] |= PANAAC_POWER_ON;
       second_frame[PANAAC_BYTEPOS_MODE] |= PANAAC_MODE_COOL;
       break;
-    case MODE_HEAT:
+    case climate::CLIMATE_MODE_HEAT:
       second_frame[PANAAC_BYTEPOS_POWER] |= PANAAC_POWER_ON;
       second_frame[PANAAC_BYTEPOS_MODE] |= PANAAC_MODE_HEAT;
       break;
-    case MODE_DRY:
+    case climate::CLIMATE_MODE_DRY:
       second_frame[PANAAC_BYTEPOS_POWER] |= PANAAC_POWER_ON;
       second_frame[PANAAC_BYTEPOS_MODE] |= PANAAC_MODE_DRY;
       break;
-    case MODE_FAN_ONLY:
+    case climate::CLIMATE_MODE_FAN_ONLY:
       second_frame[PANAAC_BYTEPOS_POWER] |= PANAAC_POWER_ON;
       second_frame[PANAAC_BYTEPOS_MODE] |= PANAAC_MODE_FAN_ONLY;
       break;
-    case MODE_AUTO:
+    case climate::CLIMATE_MODE_AUTO:
       second_frame[PANAAC_BYTEPOS_POWER] |= PANAAC_POWER_ON;
       second_frame[PANAAC_BYTEPOS_MODE] |= PANAAC_MODE_AUTO;
       break;
-    case MODE_OFF:
+    case climate::CLIMATE_MODE_OFF:
     default:
       second_frame[PANAAC_BYTEPOS_POWER] |= PANAAC_POWER_OFF;
       second_frame[PANAAC_BYTEPOS_MODE] |= PANAAC_MODE_COOL;
@@ -450,74 +689,40 @@ void PanaACV2Climate::transmit_() {
   }
 
   // temperature
-  uint8_t encoded_temp = static_cast<uint8_t>(this->target_temperature) - PANAAC_TEMP_MIN;
+  uint8_t encoded_temp = static_cast<uint8_t>(this->ac_state.temp) - PANAAC_TEMP_MIN;
   encoded_temp &= 0x0F;
   second_frame[PANAAC_BYTEPOS_TEMP] = 0x20 | (encoded_temp << 1);
-  if (static_cast<uint8_t>(this->target_temperature) < this->target_temperature)
+  if (static_cast<uint8_t>(this->ac_state.temp) < this->ac_state.temp)
     second_frame[PANAAC_BYTEPOS_TEMP] |= 0x01;
 
   // fan
-  FanLevel fan_level = PANAAC_FAN_AUTO;
-  if (this->has_custom_fan_mode()) {
-    fan_level = fan_level_from_str(this->get_custom_fan_mode().c_str());
-  } else if (this->fan_mode.has_value()) {
-    switch (this->fan_mode.value()) {
-      case climate::CLIMATE_FAN_QUIET:
-        fan_level = PANAAC_FAN_QUIET;
-        break;
-      case climate::CLIMATE_FAN_LOW:
-        fan_level = PANAAC_FAN_LEVEL_1;
-        break;
-      case climate::CLIMATE_FAN_MEDIUM:
-        fan_level = PANAAC_FAN_LEVEL_3;
-        break;
-      case climate::CLIMATE_FAN_HIGH:
-        fan_level = PANAAC_FAN_LEVEL_5;
-        break;
-      case climate::CLIMATE_FAN_AUTO:
-      default:
-        fan_level = PANAAC_FAN_AUTO;
-        break;
-    }
-  }
-  if (fan_level == PANAAC_FAN_QUIET && this->supports_quiet_) {
+  if (this->ac_state.fan_level == PANAAC_FAN_QUIET && this->supports_quiet_) {
     second_frame[PANAAC_BYTEPOS_QUIET] |= PANAAC_FAN_QUIET;
-    second_frame[PANAAC_BYTEPOS_FAN] |= fan_level;
-  } else {
-    second_frame[PANAAC_BYTEPOS_FAN] |= fan_level;
   }
+  second_frame[PANAAC_BYTEPOS_FAN] |= this->ac_state.fan_level;
 
   // swing
-  SwingVPos swing_v = (this->custom_swing_mode_ != nullptr)
-                          ? swing_v_pos_from_str(this->custom_swing_mode_)
-                          : PANAAC_SWINGV_AUTO;
-  second_frame[PANAAC_BYTEPOS_SWINGV] |= swing_v;
+  second_frame[PANAAC_BYTEPOS_SWINGV] |= this->ac_state.swing_v_pos;
   if (this->swing_horizontal_) {
-    SwingHPos swing_h = (this->swing_horizontal_mode_ != nullptr)
-                            ? swing_h_pos_from_str(this->swing_horizontal_mode_)
-                            : PANAAC_SWINGH_MIDDLE;
-    second_frame[PANAAC_BYTEPOS_SWINGH] |= swing_h;
+    second_frame[PANAAC_BYTEPOS_SWINGH] |= this->ac_state.swing_h_pos;
   } else {
     second_frame[PANAAC_BYTEPOS_SWINGH] |= PANAAC_SWINGH_NONE;
   }
 
   // checksum
-  for (uint8_t i = 0; i < 18; i++) {
+  for (uint8_t i = 0; i < 18; i++)
     second_frame[18] += second_frame[i];
-  }
 
 #if (ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE)
   char hex[3 * 19 + 1];
   int p = 0;
-  for (uint8_t b : second_frame) {
+  for (uint8_t b : second_frame)
     p += snprintf(hex + p, sizeof(hex) - p, "%02X ", b);
-  }
   ESP_LOGV(TAG, "Sending Panasonic AC IR state: len = %d, data = [ %s]", second_frame.size(), hex);
 #endif
 
   auto transmit = this->transmitter_->transmit();
   auto *data = transmit.get_data();
-
   if (this->ir_control_)
     data->set_carrier_frequency(PANAAC_IR_TRANSMIT_FREQ);
 
@@ -577,7 +782,7 @@ bool PanaACV2Climate::on_receive(remote_base::RemoteReceiveData data) {
     return false;
   }
 
-  this->publish_state_();
+  this->publish_state_by_mode_();
   return true;
 }
 
@@ -603,11 +808,10 @@ bool PanaACV2Climate::decode_data_(remote_base::RemoteReceiveData data, std::arr
           return false;
         }
       }
-
       if (data.expect_item(PANAAC_BIT_MARK, PANAAC_ONE_SPACE)) {
         byte |= 1 << a_bit;
       } else if (data.expect_item(PANAAC_BIT_MARK, PANAAC_ZERO_SPACE)) {
-        // zero, nothing to do
+        // zero
       } else {
         ESP_LOGV(TAG, "Invalid bit %d of byte %d, index = %d", a_bit, state_len, data.get_index());
         return false;
@@ -623,125 +827,149 @@ bool PanaACV2Climate::decode_data_(remote_base::RemoteReceiveData data, std::arr
 #if (ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE)
   char hex[3 * 27 + 1];
   int p = 0;
-  for (size_t i = 0; i < state_len; i++) {
+  for (size_t i = 0; i < state_len; i++)
     p += snprintf(hex + p, sizeof(hex) - p, "%02X ", state_bytes[i]);
-  }
   ESP_LOGV(TAG, "Command decoded: len = %d, data = [ %s]", state_len, hex);
 #endif
 
-  // full frame: crop the fixed first 8 bytes
   if (state_len == 27) {
-    for (size_t i = 0; i < 19; i++) {
+    for (size_t i = 0; i < 19; i++)
       state_bytes[i] = state_bytes[i + 8];
-    }
     state_len = 19;
   }
 
   return true;
 }
 
-bool PanaACV2Climate::decode_and_apply_(std::span<const uint8_t> state_bytes) {
+bool PanaACV2Climate::decode_state_(std::span<const uint8_t> state_bytes, ClimateState &state) {
   if (state_bytes.size() != 19)
     return false;
 
-  // check protocol
   if (state_bytes[0] != 0x02 || state_bytes[1] != 0x20 || state_bytes[2] != 0xE0 || state_bytes[3] != 0x04 ||
       state_bytes[4] != 0x00) {
     ESP_LOGV(TAG, "Invalid protocol");
     return false;
   }
 
-  // verify checksum
   uint8_t checksum = 0;
-  for (size_t i = 0; i < 18; i++) {
+  for (size_t i = 0; i < 18; i++)
     checksum += state_bytes[i];
-  }
   if (checksum != state_bytes[18]) {
     ESP_LOGV(TAG, "Invalid checksum");
     return false;
   }
 
   // operation mode
-  Mode pana_mode = MODE_OFF;
-  if ((state_bytes[PANAAC_BYTEPOS_POWER] & PANAAC_POWER_MASK) != PANAAC_POWER_OFF) {
+  if ((state_bytes[PANAAC_BYTEPOS_POWER] & PANAAC_POWER_MASK) == PANAAC_POWER_OFF) {
+    state.mode = climate::CLIMATE_MODE_OFF;
+  } else {
     switch (state_bytes[PANAAC_BYTEPOS_MODE] & 0xF0) {
       case PANAAC_MODE_DRY:
-        pana_mode = MODE_DRY;
+        state.mode = climate::CLIMATE_MODE_DRY;
         break;
       case PANAAC_MODE_COOL:
-        pana_mode = MODE_COOL;
+        state.mode = climate::CLIMATE_MODE_COOL;
         break;
       case PANAAC_MODE_HEAT:
-        pana_mode = MODE_HEAT;
+        state.mode = climate::CLIMATE_MODE_HEAT;
         break;
       case PANAAC_MODE_FAN_ONLY:
-        pana_mode = MODE_FAN_ONLY;
+        state.mode = climate::CLIMATE_MODE_FAN_ONLY;
         break;
       case PANAAC_MODE_AUTO:
       default:
-        pana_mode = MODE_AUTO;
+        state.mode = climate::CLIMATE_MODE_AUTO;
         break;
     }
   }
 
-  if (pana_mode == MODE_HEAT && !this->supports_heat_) {
-    ESP_LOGV(TAG, "Heat mode not supported");
-    pana_mode = MODE_OFF;
-  }
-  if (pana_mode == MODE_FAN_ONLY && !this->supports_fan_only_) {
-    ESP_LOGV(TAG, "Fan-only mode not supported");
-    pana_mode = MODE_OFF;
-  }
-  if (pana_mode == MODE_COOL && !this->supports_cool_) {
-    ESP_LOGV(TAG, "Cool mode not supported");
-    pana_mode = MODE_OFF;
-  }
-
-  this->mode = mode_to_climate_mode(pana_mode);
-
   // temperature
-  this->target_temperature = ((state_bytes[PANAAC_BYTEPOS_TEMP] & 0x1E) >> 1) + PANAAC_TEMP_MIN;
+  state.temp = ((state_bytes[PANAAC_BYTEPOS_TEMP] & 0x1E) >> 1) + PANAAC_TEMP_MIN;
   if ((state_bytes[PANAAC_BYTEPOS_TEMP] & 0x01) == 0x01)
-    this->target_temperature += 0.5;
+    state.temp += 0.5;
 
   // fan
-  uint8_t fan = state_bytes[PANAAC_BYTEPOS_FAN] & 0xF0;
-  FanLevel fan_level = static_cast<FanLevel>(fan);
-  if (this->supports_quiet_) {
-    if ((state_bytes[PANAAC_BYTEPOS_QUIET] & 0xF0) == PANAAC_FAN_QUIET)
-      fan_level = PANAAC_FAN_QUIET;
+  switch (state_bytes[PANAAC_BYTEPOS_FAN] & 0xF0) {
+    case PANAAC_FAN_LEVEL_1:
+      state.fan_mode = climate::CLIMATE_FAN_LOW;
+      state.fan_level = PANAAC_FAN_LEVEL_1;
+      break;
+    case PANAAC_FAN_LEVEL_2:
+      state.fan_mode = climate::CLIMATE_FAN_LOW;
+      state.fan_level = PANAAC_FAN_LEVEL_2;
+      break;
+    case PANAAC_FAN_LEVEL_3:
+      state.fan_mode = climate::CLIMATE_FAN_MEDIUM;
+      state.fan_level = PANAAC_FAN_LEVEL_3;
+      break;
+    case PANAAC_FAN_LEVEL_4:
+      state.fan_mode = climate::CLIMATE_FAN_MEDIUM;
+      state.fan_level = PANAAC_FAN_LEVEL_4;
+      break;
+    case PANAAC_FAN_LEVEL_5:
+      state.fan_mode = climate::CLIMATE_FAN_HIGH;
+      state.fan_level = PANAAC_FAN_LEVEL_5;
+      break;
+    case PANAAC_FAN_AUTO:
+    default:
+      state.fan_mode = climate::CLIMATE_FAN_AUTO;
+      state.fan_level = PANAAC_FAN_AUTO;
+      break;
   }
-  // A 3-level AC cannot represent Level 2/4. Discard those and leave the current fan mode
-  // unchanged — calling set_custom_fan_mode_() with an unregistered mode would null the
-  // custom fan mode (Climate::set_custom_mode clears it), which publish_state_() then
-  // renders as "Auto" in the UI. Skip the call entirely so the UI keeps its last value.
-  if ((fan_level == PANAAC_FAN_LEVEL_2 || fan_level == PANAAC_FAN_LEVEL_4) && !this->fan_5level_) {
-    ESP_LOGV(TAG, "Fan level %s requires 5-level support; ignoring", fan_level_to_str(fan_level));
-  } else {
-    const char *fan_str = fan_level_to_str(fan_level);
-    this->set_custom_fan_mode_(fan_str, strlen(fan_str));
+  if (this->supports_quiet_ && (state_bytes[PANAAC_BYTEPOS_QUIET] & 0xF0) == PANAAC_FAN_QUIET) {
+    state.fan_mode = climate::CLIMATE_FAN_QUIET;
+    state.fan_level = PANAAC_FAN_QUIET;
   }
 
   // swing
   uint8_t swing_v = state_bytes[PANAAC_BYTEPOS_SWINGV] & 0x0F;
   uint8_t swing_h = state_bytes[PANAAC_BYTEPOS_SWINGH] & 0x0F;
+  state.swing_v_pos = static_cast<SwingVPos>(swing_v);
+  state.swing_h_pos = static_cast<SwingHPos>(swing_h);
+  if (!this->swing_horizontal_)
+    swing_h = PANAAC_SWINGH_NONE;
+  if (swing_v == PANAAC_SWINGV_AUTO && swing_h == PANAAC_SWINGH_AUTO)
+    state.swing_mode = climate::CLIMATE_SWING_BOTH;
+  else if (swing_v == PANAAC_SWINGV_AUTO)
+    state.swing_mode = climate::CLIMATE_SWING_VERTICAL;
+  else if (swing_h == PANAAC_SWINGH_AUTO)
+    state.swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+  else
+    state.swing_mode = climate::CLIMATE_SWING_OFF;
 
-  SwingVPos v_pos = static_cast<SwingVPos>(swing_v);
-  this->custom_swing_mode_ = swing_v_pos_to_str(v_pos);
-  if (v_pos != PANAAC_SWINGV_AUTO)
-    this->last_swing_v_pos_ = v_pos;
+  return true;
+}
 
-  if (this->swing_horizontal_) {
-    SwingHPos h_pos = static_cast<SwingHPos>(swing_h);
-    if (h_pos != PANAAC_SWINGH_NONE) {
-      this->swing_horizontal_mode_ = swing_h_pos_to_str(h_pos);
-      if (h_pos != PANAAC_SWINGH_AUTO)
-        this->last_swing_h_pos_ = h_pos;
-    }
-  } else {
-    this->swing_horizontal_mode_ = nullptr;
+bool PanaACV2Climate::decode_and_apply_(std::span<const uint8_t> state_bytes) {
+  ClimateState decoded{};
+  if (!this->decode_state_(state_bytes, decoded))
+    return false;
+
+  // Reject unsupported modes from the remote.
+  if (decoded.mode == climate::CLIMATE_MODE_HEAT && !this->supports_heat_) {
+    ESP_LOGV(TAG, "Heat mode not supported");
+    return false;
+  }
+  if (decoded.mode == climate::CLIMATE_MODE_FAN_ONLY && !this->supports_fan_only_) {
+    ESP_LOGV(TAG, "Fan-only mode not supported");
+    return false;
+  }
+  if (decoded.mode == climate::CLIMATE_MODE_COOL && !this->supports_cool_) {
+    ESP_LOGV(TAG, "Cool mode not supported");
+    return false;
   }
 
+  // A 3-level AC cannot represent Level 2/4: discard those and keep the current fan level so the
+  // UI does not jump to "Auto" (the granular select / climate card keep their last value).
+  if ((decoded.fan_level == PANAAC_FAN_LEVEL_2 || decoded.fan_level == PANAAC_FAN_LEVEL_4) && !this->fan_5level_) {
+    ESP_LOGV(TAG, "Fan level %s requires 5-level support; ignoring", fan_level_to_str(decoded.fan_level));
+    decoded.fan_level = this->ac_state.fan_level;
+    decoded.fan_mode = this->ac_state.fan_mode;
+  }
+
+  this->ac_state = decoded;
+  this->sync_to_climate_();
+  this->update_selects_();
   return true;
 }
 

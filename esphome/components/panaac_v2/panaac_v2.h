@@ -17,8 +17,8 @@
 #pragma once
 
 #include "definitions.h"
+#include "extra.h"
 #include "esphome/components/climate/climate.h"
-#include "esphome/components/mqtt/custom_mqtt_device.h"
 #include "esphome/components/remote_base/remote_base.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/core/component.h"
@@ -28,27 +28,43 @@
 #include <span>
 #include <string>
 
+#ifdef USE_MQTT
+#include "esphome/components/mqtt/custom_mqtt_device.h"
+#endif
+
 namespace esphome::panaac_v2 {
 
-/** PanaAC v2 — Panasonic AC controller driven entirely over MQTT.
+/** PanaAC v2 — Panasonic AC controller with two exposure modes.
  *
- * This component inherits from the ESPHome Climate base class so that it exposes
- * the standard climate automation surface: lambdas (`id(ac).make_call()`,
- * `id(ac).mode`, `id(ac).target_temperature`, ...), `on_state` triggers and
- * `on_control` triggers.  It still publishes its state, traits and availability
- * to the custom `<prefix>/...` MQTT topics so that the PanaAC v2 Home Assistant
- * custom integration can expose arbitrary Panasonic fan levels, vertical-swing
- * positions and a separate horizontal-swing axis.
+ * The IR encode/decode core and the canonical `ac_state` (mode/temp/fan_level/swing positions)
+ * are shared. What differs is how the state is exposed to Home Assistant:
+ *
+ * - **v1 native mode** (`topic_prefix` unset, `mqtt_enabled_ = false`): a normal native climate
+ *   (standard fan/swing enums, visible on the ESPHome API / standard MQTT discovery) plus three
+ *   companion `select` entities (Fan Level / Swing Vertical / Swing Horizontal) that give the
+ *   full Panasonic granularity. Behaves like PanaAC v1 (+ issue #15 grouping). No MQTT broker
+ *   is required — all MQTT code is compiled out (`USE_MQTT` undefined).
+ * - **v2 MQTT mode** (`topic_prefix` set, `mqtt_enabled_ = true`, requires a `mqtt:` block so
+ *   `USE_MQTT` is defined): the climate is `internal` (hidden from the native API / standard
+ *   discovery) and is exposed over the custom `<prefix>/state|traits|availability|set` MQTT
+ *   JSON topics consumed by the PanaAC v2 HA custom integration (single all-in-one climate
+ *   card). The same three `(PanaAC v1)` selects are also created for granular native control.
+ *
+ * `ac_state` is the single source of truth; the Climate base fields and (in v2 mode) the custom
+ * fan/swing strings are derived from it via `sync_to_climate_()`.
  */
 class PanaACV2Climate : public climate::Climate,
                         public Component,
+#ifdef USE_MQTT
                         public mqtt::CustomMQTTDevice,
+#endif
                         public remote_base::RemoteReceiverListener,
                         public remote_base::RemoteTransmittable {
  public:
   PanaACV2Climate();
 
   void set_topic_prefix(const std::string &topic_prefix) { this->topic_prefix_ = topic_prefix; }
+  void set_mqtt_enabled(bool enabled) { this->mqtt_enabled_ = enabled; }
   void set_supports_cool(bool supports) { this->supports_cool_ = supports; }
   void set_supports_heat(bool supports) { this->supports_heat_ = supports; }
   void set_supports_fan_only(bool supports) { this->supports_fan_only_ = supports; }
@@ -59,20 +75,23 @@ class PanaACV2Climate : public climate::Climate,
   void set_ir_control(bool ir_control) { this->ir_control_ = ir_control; }
   void set_sensor(sensor::Sensor *sensor) { this->sensor_ = sensor; }
 
+  void set_fanlevel(PanaACV2FanLevel *fanlevel) { this->fanlevel_ = fanlevel; }
+  void set_swingv(PanaACV2SwingV *swingv) { this->swingv_ = swingv; }
+  void set_swingh(PanaACV2SwingH *swingh) { this->swingh_ = swingh; }
+
+  /// Entry points used by the companion selects (both modes). Each validates, mutates
+  /// `ac_state`, transmits the IR frame, publishes (by mode), and re-syncs the other selects.
+  void apply_fan_select_(FanLevel level);
+  void apply_swingv_select_(SwingVPos pos);
+  void apply_swingh_select_(SwingHPos pos);
+
   void setup() override;
   void dump_config() override;
   void loop() override;
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
-  /// Direct accessors for Panasonic-specific vertical/horizontal swing strings.
-  /// These are NOT backed by the standard Climate enum because ESPHome's core
-  /// climate component does not support arbitrary swing strings. They are kept
-  /// inside this custom component so the component compiles against unmodified
-  /// ESPHome source.
-  void set_swing_mode_str(const char *mode) { this->custom_swing_mode_ = mode; }
-  void set_swing_horizontal_mode_str(const char *mode) { this->swing_horizontal_mode_ = mode; }
-  const char *get_swing_mode_str() const { return this->custom_swing_mode_; }
-  const char *get_swing_horizontal_mode_str() const { return this->swing_horizontal_mode_; }
+  /// Public by design: the companion select entities read/write it directly (like v1).
+  ClimateState ac_state;
 
  protected:
   /// Climate integration interface.
@@ -81,23 +100,33 @@ class PanaACV2Climate : public climate::Climate,
 
   bool on_receive(remote_base::RemoteReceiveData data) override;
 
+  // IR core (operate on ac_state).
+  void transmit_data_();
+  bool decode_data_(remote_base::RemoteReceiveData data, std::array<uint8_t, 27> &state_bytes, size_t &state_len);
+  bool decode_state_(std::span<const uint8_t> state_bytes, ClimateState &state);
+  bool decode_and_apply_(std::span<const uint8_t> state_bytes);
+
+  // State synchronization helpers.
+  void sync_to_climate_();         // derive Climate base fields (+ v2 custom strings) from ac_state
+  void update_selects_();          // push ac_state fan/swing positions to the select entities
+  void publish_state_by_mode_();   // v2: MQTT publish_state_() + publish_state(); v1: publish_state()
+  void recompute_swing_mode_();    // derive ac_state.swing_mode from swing_v_pos / swing_h_pos
+
+#ifdef USE_MQTT
+  // v2 MQTT publish helpers (only used when mqtt_enabled_).
   void publish_state_();
   void publish_traits_();
-
   void on_set_json_(const std::string &topic, JsonObject root);
-
   bool set_swing_mode_if_supported_(const char *mode);
   bool set_swing_horizontal_mode_if_supported_(const char *mode);
-
-  void transmit_();
-  bool decode_data_(remote_base::RemoteReceiveData data, std::array<uint8_t, 27> &state_bytes, size_t &state_len);
-  bool decode_and_apply_(std::span<const uint8_t> state_bytes);
 
   std::string state_topic_() const { return this->topic_prefix_ + "/state"; }
   std::string traits_topic_() const { return this->topic_prefix_ + "/traits"; }
   std::string set_topic_() const { return this->topic_prefix_ + "/set"; }
+#endif
 
-  std::string topic_prefix_{"panaac_v2/panaac_v2"};
+  std::string topic_prefix_;
+  bool mqtt_enabled_{false};
 
   bool supports_cool_{true};
   bool supports_heat_{false};
@@ -109,13 +138,14 @@ class PanaACV2Climate : public climate::Climate,
   bool ir_control_{false};
   sensor::Sensor *sensor_{nullptr};
 
-  // Panasonic-specific swing state, stored internally instead of in Climate base class.
+  PanaACV2FanLevel *fanlevel_{nullptr};
+  PanaACV2SwingV *swingv_{nullptr};
+  PanaACV2SwingH *swingh_{nullptr};
+
+  // v2 custom swing strings (derived from ac_state; published over MQTT). Kept as members so
+  // publish_state_() and the v2 set path can read them without re-deriving each time.
   const char *custom_swing_mode_{STR_SWINGV_MIDDLE};
   const char *swing_horizontal_mode_{STR_SWINGH_MIDDLE};
-
-  // Last fixed swing positions used when "swing off" is requested.
-  SwingVPos last_swing_v_pos_{PANAAC_SWINGV_MIDDLE};
-  SwingHPos last_swing_h_pos_{PANAAC_SWINGH_MIDDLE};
 
   bool traits_published_{false};
 };
