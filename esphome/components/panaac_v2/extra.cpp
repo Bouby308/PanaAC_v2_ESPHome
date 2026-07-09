@@ -19,24 +19,6 @@
 
 namespace esphome::panaac_v2 {
 
-// ---------------- PanaACV2FanLevel ----------------
-
-void PanaACV2FanLevel::dump_config() {
-  ESP_LOGCONFIG(TAG, "PanaACV2FanLevel (PanaAC v1):");
-  LOG_SELECT("  Fan Level: ", "fan_level", this);
-}
-
-void PanaACV2FanLevel::control(const std::string &value) {
-  ESP_LOGI(TAG, "Fan Level selected: %s", value.c_str());
-  this->climate_->apply_fan_select_(fan_level_from_str(value.c_str()));
-}
-
-void PanaACV2FanLevel::setup() {}
-
-void PanaACV2FanLevel::set_fanlevel(FanLevel fanlevel) {
-  this->publish_state(fan_level_to_str(fanlevel));
-}
-
 // ---------------- PanaACV2SwingV ----------------
 
 void PanaACV2SwingV::dump_config() {

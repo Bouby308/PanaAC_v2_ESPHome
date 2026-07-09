@@ -41,7 +41,6 @@ PanaACV2Climate = panaac_v2_ns.class_(
     remote_base.RemoteReceiverListener,
     remote_base.RemoteTransmittable,
 )
-PanaACV2FanLevel = panaac_v2_ns.class_('PanaACV2FanLevel', select.Select, cg.Component)
 PanaACV2SwingV = panaac_v2_ns.class_('PanaACV2SwingV', select.Select, cg.Component)
 PanaACV2SwingH = panaac_v2_ns.class_('PanaACV2SwingH', select.Select, cg.Component)
 
@@ -55,7 +54,6 @@ CONF_SWING_HORIZONTAL = "swing_horizontal"
 CONF_TEMP_STEP = "temp_step"
 CONF_IR_CONTROL = "ir_control"
 
-CONF_FANLEVEL_ID = "fanlevel_id"
 CONF_SWINGV_ID = "swingv_id"
 CONF_SWINGH_ID = "swingh_id"
 
@@ -72,7 +70,6 @@ CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
     cv.Optional(CONF_TEMP_STEP, default=1.0): cv.float_range(min=0.5, max=1.0),
     cv.Optional(CONF_IR_CONTROL, default=False): cv.boolean,
     cv.Optional(CONF_SENSOR): cv.use_id(sensor.Sensor),
-    cv.GenerateID(CONF_FANLEVEL_ID): cv.declare_id(PanaACV2FanLevel),
     cv.GenerateID(CONF_SWINGV_ID): cv.declare_id(PanaACV2SwingV),
     cv.GenerateID(CONF_SWINGH_ID): cv.declare_id(PanaACV2SwingH),
 }).extend(cv.COMPONENT_SCHEMA).extend(remote_base.REMOTE_TRANSMITTABLE_SCHEMA).extend(remote_base.REMOTE_LISTENER_SCHEMA)
@@ -104,8 +101,8 @@ async def to_code(config):
         config.pop(CONF_MQTT_ID, None)
 
     # Append the "(PanaAC v1)" suffix to the climate name so the on-device climate reads as one
-    # coherent v1 set with its three companion selects ("Fan Level (PanaAC v1)" etc.) and is
-    # never mistaken for the full PanaAC v2 climate card (which in v2 mode comes from the
+    # coherent v1 set with its two companion selects ("Swing Vertical/Horizontal (PanaAC v1)") and
+    # is never mistaken for the full PanaAC v2 climate card (which in v2 mode comes from the
     # PanaAC v2 HA custom integration over MQTT). Applied in BOTH modes, before new_climate()
     # so the entity name and object_id hash both reflect the suffixed name.
     climate_name = config.get(CONF_NAME) or ""
@@ -121,10 +118,10 @@ async def to_code(config):
     if mqtt_enabled:
         cg.add(var.set_topic_prefix(config[CONF_TOPIC_PREFIX]))
         # The on-device "(PanaAC v1)" climate stays VISIBLE on the native API alongside the
-        # three "(PanaAC v1)" selects, at the root of the ESPHome device — exactly like PanaAC
-        # v1. The full-featured PanaAC v2 climate card is still provided by the PanaAC v2 HA
-        # custom integration over the custom MQTT topics below. CONF_MQTT_ID is dropped above so
-        # ESPHome does not ALSO publish a standard MQTT climate component that would duplicate
+        # two "(PanaAC v1)" Swing V/H selects, at the root of the ESPHome device — exactly like
+        # PanaAC v1. The full-featured PanaAC v2 climate card is still provided by the PanaAC v2
+        # HA custom integration over the custom MQTT topics below. CONF_MQTT_ID is dropped above
+        # so ESPHome does not ALSO publish a standard MQTT climate component that would duplicate
         # the HA-integration climate; the native API is the transport for the visible climate.
 
     cg.add(var.set_supports_cool(config[CONF_SUPPORTS_COOL]))
@@ -139,10 +136,9 @@ async def to_code(config):
         sens = await cg.get_variable(sensor_id)
         cg.add(var.set_sensor(sens))
 
-    # Three companion selects (PanaAC v1 features) — created in BOTH modes.
-    fanlevel = await _make_select(config[CONF_FANLEVEL_ID], config, "Fan Level (PanaAC v1)",
-                                  "mdi:fan", var)
-    cg.add(var.set_fanlevel(fanlevel))
+    # Companion Swing V/H selects (PanaAC v1 features), created in BOTH modes — the granular swing
+    # positions are not on the climate card. Fan levels are NOT a select: they are the climate's
+    # custom fan modes (Fan Mode) in both modes, so no Fan Level select is created.
     swingv = await _make_select(config[CONF_SWINGV_ID], config, "Swing Vertical (PanaAC v1)",
                                 "mdi:arrow-split-vertical", var)
     cg.add(var.set_swingv(swingv))

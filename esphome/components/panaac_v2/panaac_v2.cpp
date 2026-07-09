@@ -47,14 +47,19 @@ inline climate::ClimateFanMode fan_level_to_standard(FanLevel level) {
 }  // namespace
 
 PanaACV2Climate::PanaACV2Climate() {
-  this->target_temperature = 24.0f;
+  // Fresh-boot defaults (used when no state is restored from flash, e.g. after a factory erase):
+  // off, 26 °C, fan Auto, vertical swing Auto, horizontal swing Auto. setup() re-derives ac_state
+  // from these base fields, so set the base swing_mode to BOTH → swing_v_pos/swing_h_pos = AUTO
+  // (clamped to VERTICAL by setup() when swing_horizontal_ is false).
+  this->target_temperature = 26.0f;
+  this->swing_mode = climate::CLIMATE_SWING_BOTH;
   this->ac_state.mode = climate::CLIMATE_MODE_OFF;
-  this->ac_state.temp = 24.0f;
+  this->ac_state.temp = 26.0f;
   this->ac_state.fan_mode = climate::CLIMATE_FAN_AUTO;
   this->ac_state.fan_level = PANAAC_FAN_AUTO;
-  this->ac_state.swing_mode = climate::CLIMATE_SWING_OFF;
-  this->ac_state.swing_v_pos = PANAAC_SWINGV_MIDDLE;
-  this->ac_state.swing_h_pos = PANAAC_SWINGH_MIDDLE;
+  this->ac_state.swing_mode = climate::CLIMATE_SWING_BOTH;
+  this->ac_state.swing_v_pos = PANAAC_SWINGV_AUTO;
+  this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
   this->ac_state.last_swing_v_pos = PANAAC_SWINGV_MIDDLE;
   this->ac_state.last_swing_h_pos = PANAAC_SWINGH_MIDDLE;
 }
@@ -67,47 +72,33 @@ void PanaACV2Climate::setup() {
   if (this->mqtt_enabled_)
     ESP_LOGCONFIG(TAG, "  Topic prefix: %s", this->topic_prefix_.c_str());
 
-  // v2 mode registers the arbitrary Panasonic fan-level strings as Climate custom fan modes
-  // (the single all-in-one MQTT climate card). v1 mode uses only the standard fan enum.
-  if (this->mqtt_enabled_) {
+  // Register the Panasonic fan-level strings as Climate custom fan modes (BOTH modes) so the fan
+  // levels are selectable directly from the climate card's Fan Mode. Auto/Quiet are NOT custom —
+  // they are the standard CLIMATE_FAN_AUTO/CLIMATE_FAN_QUIET enums (advertised in traits()) so the
+  // card shows each once (no duplicate custom strings) and `set_fan_mode("Auto"/"Quiet")` routes
+  // to the enum and passes validate_(). Only the levels (which the standard enum can't represent)
+  // are custom. This makes the standalone Fan Level select redundant, so it is no longer created.
+  {
     // A 3-level AC exposes Level 1/3/5 (low/medium/high); a 5-level AC adds Level 2 and 4.
-    std::vector<const char *> fan_modes = {STR_FAN_AUTO, STR_FAN_L1};
+    std::vector<const char *> fan_modes = {STR_FAN_L1};
     if (this->fan_5level_)
       fan_modes.push_back(STR_FAN_L2);
     fan_modes.push_back(STR_FAN_L3);
     if (this->fan_5level_)
       fan_modes.push_back(STR_FAN_L4);
     fan_modes.push_back(STR_FAN_L5);
-    if (this->supports_quiet_)
-      fan_modes.push_back(STR_FAN_QUIET);
     this->set_supported_custom_fan_modes(fan_modes);
   }
 
-  // Fill the companion selects' options at runtime (v1 pattern). Done in BOTH modes so the
-  // selects are functional and MQTT-discoverable in v2 mode too.
-  if (this->fanlevel_ != nullptr) {
-    FixedVector<const char *> fanlevel_options;
-    fanlevel_options.init(7);
-    fanlevel_options.push_back(STR_FAN_AUTO);
-    fanlevel_options.push_back(STR_FAN_L1);
-    if (this->fan_5level_) {
-      fanlevel_options.push_back(STR_FAN_L2);
-      fanlevel_options.push_back(STR_FAN_L3);
-      fanlevel_options.push_back(STR_FAN_L4);
-    } else {
-      fanlevel_options.push_back(STR_FAN_L3);
-    }
-    fanlevel_options.push_back(STR_FAN_L5);
-    if (this->supports_quiet_)
-      fanlevel_options.push_back(STR_FAN_QUIET);
-    this->fanlevel_->traits.set_options(fanlevel_options);
-
+  // Fill the companion Swing V/H selects' options at runtime. (The Fan Level select is gone — fan
+  // levels are climate custom fan modes now.) The selects exist in BOTH modes.
+  if (this->swingv_ != nullptr) {
     this->swingv_->traits.set_options(
         {STR_SWINGV_AUTO, STR_SWINGV_HIGHEST, STR_SWINGV_HIGH, STR_SWINGV_MIDDLE, STR_SWINGV_LOW, STR_SWINGV_LOWEST});
-    if (this->swing_horizontal_ && this->swingh_ != nullptr) {
-      this->swingh_->traits.set_options({STR_SWINGH_AUTO, STR_SWINGH_LEFTMAX, STR_SWINGH_LEFT, STR_SWINGH_MIDDLE,
-                                         STR_SWINGH_RIGHT, STR_SWINGH_RIGHTMAX});
-    }
+  }
+  if (this->swing_horizontal_ && this->swingh_ != nullptr) {
+    this->swingh_->traits.set_options({STR_SWINGH_AUTO, STR_SWINGH_LEFTMAX, STR_SWINGH_LEFT, STR_SWINGH_MIDDLE,
+                                       STR_SWINGH_RIGHT, STR_SWINGH_RIGHTMAX});
   }
 
   // v2 mode: subscribe to the MQTT set topic + current-temperature sensor callback.
@@ -210,31 +201,18 @@ climate::ClimateTraits PanaACV2Climate::traits() {
 
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
 
-  if (this->mqtt_enabled_) {
-    // v2: the custom fan-level strings are registered via set_supported_custom_fan_modes() in
-    // setup(). Also advertise the standard AUTO/QUIET enums whose names collide with our custom
-    // strings so ClimateCall::set_fan_mode("Auto"/"Quiet") passes validate_() (see control()).
-    traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
-    if (this->supports_quiet_)
-      traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
-    // The visible "(PanaAC v1)" climate card also carries the standard swing modes (just like
-    // PanaAC v1); the granular swing POSITIONS stay on the three selects / the v2 MQTT topics.
-    traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL});
-    if (this->swing_horizontal_) {
-      traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
-      traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
-    }
-  } else {
-    // v1: standard fan enum only (lossy; L2/L4 reachable via the Fan Level select).
-    traits.set_supported_fan_modes({climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM,
-                                    climate::CLIMATE_FAN_HIGH});
-    if (this->supports_quiet_)
-      traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
-    traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL});
-    if (this->swing_horizontal_) {
-      traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
-      traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
-    }
+  // Fan modes (BOTH modes): standard Auto/Quiet enums + custom Level 1..5 strings (registered via
+  // set_supported_custom_fan_modes() in setup()). Auto/Quiet as enums keeps the card duplicate-free
+  // and lets ClimateCall::set_fan_mode("Auto"/"Quiet") route to the enum and pass validate_().
+  traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
+  if (this->supports_quiet_)
+    traits.add_supported_fan_mode(climate::CLIMATE_FAN_QUIET);
+  // The climate card carries the standard swing modes; the granular swing POSITIONS stay on the
+  // Swing V/H selects / the v2 MQTT topics.
+  traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL});
+  if (this->swing_horizontal_) {
+    traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
+    traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
   }
 
   traits.set_visual_min_temperature(PANAAC_TEMP_MIN);
@@ -270,9 +248,19 @@ void PanaACV2Climate::sync_to_climate_() {
   this->mode = ac_state.mode;
   this->target_temperature = ac_state.temp;
 
-  if (this->mqtt_enabled_) {
+  // Fan (BOTH modes): Auto/Quiet → standard enum; levels → custom fan-mode string. Using the
+  // protected setters (not assigning `this->fan_mode` directly) clears the opposite field so the
+  // card never shows both an enum and a custom value.
+  if (ac_state.fan_level == PANAAC_FAN_AUTO) {
+    this->set_fan_mode_(climate::CLIMATE_FAN_AUTO);
+  } else if (ac_state.fan_level == PANAAC_FAN_QUIET) {
+    this->set_fan_mode_(climate::CLIMATE_FAN_QUIET);
+  } else {
     const char *fan_str = fan_level_to_str(ac_state.fan_level);
     this->set_custom_fan_mode_(fan_str, strlen(fan_str));
+  }
+
+  if (this->mqtt_enabled_) {
     this->custom_swing_mode_ = swing_v_pos_to_str(ac_state.swing_v_pos);
     this->swing_horizontal_mode_ = this->swing_horizontal_ ? swing_h_pos_to_str(ac_state.swing_h_pos) : nullptr;
     // The visible "(PanaAC v1)" climate card advertises the standard swing modes, so mirror
@@ -280,14 +268,11 @@ void PanaACV2Climate::sync_to_climate_() {
     // Climate base field so the card reflects the current swing state.
     this->swing_mode = ac_state.swing_mode;
   } else {
-    this->fan_mode = ac_state.fan_mode;
     this->swing_mode = ac_state.swing_mode;
   }
 }
 
 void PanaACV2Climate::update_selects_() {
-  if (this->fanlevel_ != nullptr)
-    this->fanlevel_->set_fanlevel(ac_state.fan_level);
   if (this->swingv_ != nullptr)
     this->swingv_->set_swingvpos(ac_state.swing_v_pos);
   if (this->swing_horizontal_ && this->swingh_ != nullptr)
@@ -397,7 +382,7 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
   if (call.get_swing_mode().has_value()) {
     // Standard swing modes are handled in BOTH modes — the visible "(PanaAC v1)" climate card
     // has the same Off/Vertical/Horizontal/Both swing controls as PanaAC v1 (the granular swing
-    // positions still live on the three selects / the v2 MQTT topics). The v2 MQTT set path
+    // positions still live on the Swing V/H selects / the v2 MQTT topics). The v2 MQTT set path
     // never reaches here: it applies the Panasonic swing position strings directly in
     // on_set_json_() (via set_swing_mode_if_supported_ / set_swing_horizontal_mode_if_supported_).
     auto sm = *call.get_swing_mode();
@@ -473,23 +458,6 @@ void PanaACV2Climate::recompute_swing_mode_() {
 }
 
 // ---------------- Select entry points (both modes) ----------------
-
-void PanaACV2Climate::apply_fan_select_(FanLevel level) {
-  if (level == PANAAC_FAN_QUIET && !this->supports_quiet_) {
-    ESP_LOGW(TAG, "Quiet fan mode not supported");
-    return;
-  }
-  if ((level == PANAAC_FAN_LEVEL_2 || level == PANAAC_FAN_LEVEL_4) && !this->fan_5level_) {
-    ESP_LOGW(TAG, "Fan level %s requires 5-level support", fan_level_to_str(level));
-    return;
-  }
-  this->ac_state.fan_level = level;
-  this->ac_state.fan_mode = fan_level_to_standard(level);
-  this->sync_to_climate_();
-  this->publish_state_by_mode_();  // reflect before the blocking IR send
-  this->update_selects_();
-  this->transmit_data_();
-}
 
 void PanaACV2Climate::apply_swingv_select_(SwingVPos pos) {
   this->ac_state.swing_v_pos = pos;

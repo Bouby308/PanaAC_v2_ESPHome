@@ -19,7 +19,7 @@ esp8266:
 # Enable logging
 logger:
 
-# Native Home Assistant API — the climate + 3 selects are exposed here (v1 mode).
+# Native Home Assistant API — the climate + 2 Swing V/H selects are exposed here (v1 mode).
 api:
 
 # Allow Over-The-Air updates
@@ -39,10 +39,12 @@ wifi:
 
 captive_portal:
 
-# v1 mode uses the native API (above) to expose the climate + 3 selects — no MQTT broker is
-# required. If you do add a `mqtt:` block, the climate is additionally published via ESPHome's
-# standard MQTT discovery (like PanaAC v1); the three selects stay on the native API. Either
+# v1 mode uses the native API (above) to expose the climate + 2 Swing V/H selects — no MQTT
+# broker is required. If you do add a `mqtt:` block, the climate is additionally published via
+# ESPHome's standard MQTT discovery (like PanaAC v1); the selects stay on the native API. Either
 # way, NO `topic_prefix` is set on panaac_v2 below, so the custom v2 MQTT topics are NOT used.
+# Fan levels (Auto / Level 1..5 / Quiet) are the climate's Fan Mode (custom fan modes) — there is
+# no separate Fan Level select.
 
 # Non-invasive wiring: separate IR receiver and IR LED.
 #   GPIO14 = D5  <- IR receiver (TSOP38xxx) data pin, inverted
@@ -72,11 +74,11 @@ sensor:
     device_class: temperature
 
 # v1 native mode: NO topic_prefix. The component behaves like PanaAC v1 — a native climate
-# (standard fan/swing enums, named "<name> (PanaAC v1)") plus the three (PanaAC v1) selects
-# (Fan Level / Swing Vertical / Swing Horizontal), all at the root of the ESPHome device (no
-# sub-device), exactly like PanaAC_ESPHome. The "(PanaAC v1)" name suffix is added by the
-# component in both modes. (Optionally set `device_id` + an `esphome.devices` sub-device to
-# regroup them under a named sub-device — issue #15.)
+# whose Fan Mode carries the full Panasonic fan levels (Auto / Level 1..5 / Quiet, named
+# "<name> (PanaAC v1)") plus the two (PanaAC v1) Swing V/H selects, all at the root of the
+# ESPHome device (no sub-device), exactly like PanaAC_ESPHome. The "(PanaAC v1)" name suffix is
+# added by the component in both modes. (Optionally set `device_id` + an `esphome.devices`
+# sub-device to regroup them under a named sub-device — issue #15.)
 panaac_v2:
   name: "Remote Controller"
   id: panaac_v2_climate

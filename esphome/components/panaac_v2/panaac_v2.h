@@ -40,18 +40,19 @@ namespace esphome::panaac_v2 {
  * are shared. What differs is how the state is exposed to Home Assistant:
  *
  * - **v1 native mode** (`topic_prefix` unset, `mqtt_enabled_ = false`): a normal native climate
- *   (standard fan/swing enums, visible on the ESPHome API / standard MQTT discovery) plus three
- *   companion `select` entities (Fan Level / Swing Vertical / Swing Horizontal) that give the
- *   full Panasonic granularity. Behaves like PanaAC v1. No MQTT broker is required — all MQTT
- *   code is compiled out (`USE_MQTT` undefined). The climate + selects sit at the root of the
- *   ESPHome device, like PanaAC v1 (optionally regrouped under a `device_id` sub-device).
+ *   whose Fan Mode offers the full Panasonic fan levels (Auto / Level 1..5 / Quiet) as custom fan
+ *   modes plus standard Auto/Quiet enums, visible on the ESPHome API / standard MQTT discovery,
+ *   plus two companion `select` entities (Swing Vertical / Swing Horizontal) for the granular swing
+ *   positions. Behaves like PanaAC v1. No MQTT broker is required — all MQTT code is compiled out
+ *   (`USE_MQTT` undefined). The climate + selects sit at the root of the ESPHome device, like
+ *   PanaAC v1 (optionally regrouped under a `device_id` sub-device).
  * - **v2 MQTT mode** (`topic_prefix` set, `mqtt_enabled_ = true`, requires a `mqtt:` block so
  *   `USE_MQTT` is defined): the climate is exposed over the custom
  *   `<prefix>/state|traits|availability|set` MQTT JSON topics consumed by the PanaAC v2 HA custom
  *   integration (the single all-in-one v2 climate card). It is ALSO kept visible on the native
  *   API as a "(PanaAC v1)" climate — standard swing modes + custom fan-level strings + the same
- *   three `(PanaAC v1)` selects — at the root of the ESPHome device, exactly like PanaAC v1. The
- *   custom MQTT topics are independent of the native ClimateTraits (publish_traits_() is
+ *   two `(PanaAC v1)` Swing V/H selects — at the root of the ESPHome device, exactly like PanaAC
+ *   v1. The custom MQTT topics are independent of the native ClimateTraits (publish_traits_() is
  *   hand-rolled JSON), so the v2 HA-integration card is unaffected by the visible native climate.
  *
  * `ac_state` is the single source of truth; the Climate base fields and (in v2 mode) the custom
@@ -79,13 +80,11 @@ class PanaACV2Climate : public climate::Climate,
   void set_ir_control(bool ir_control) { this->ir_control_ = ir_control; }
   void set_sensor(sensor::Sensor *sensor) { this->sensor_ = sensor; }
 
-  void set_fanlevel(PanaACV2FanLevel *fanlevel) { this->fanlevel_ = fanlevel; }
   void set_swingv(PanaACV2SwingV *swingv) { this->swingv_ = swingv; }
   void set_swingh(PanaACV2SwingH *swingh) { this->swingh_ = swingh; }
 
-  /// Entry points used by the companion selects (both modes). Each validates, mutates
-  /// `ac_state`, transmits the IR frame, publishes (by mode), and re-syncs the other selects.
-  void apply_fan_select_(FanLevel level);
+  /// Entry points used by the companion Swing V/H selects (both modes). Each validates, mutates
+  /// `ac_state`, transmits the IR frame, publishes (by mode), and re-syncs the other select.
   void apply_swingv_select_(SwingVPos pos);
   void apply_swingh_select_(SwingHPos pos);
 
@@ -142,7 +141,6 @@ class PanaACV2Climate : public climate::Climate,
   bool ir_control_{false};
   sensor::Sensor *sensor_{nullptr};
 
-  PanaACV2FanLevel *fanlevel_{nullptr};
   PanaACV2SwingV *swingv_{nullptr};
   PanaACV2SwingH *swingh_{nullptr};
 
