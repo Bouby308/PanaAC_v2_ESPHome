@@ -110,6 +110,7 @@ panaac_v2:
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
   topic_prefix: "panaac_v2/esphome-panaac-v2"
+  hide_legacy_comps: true  # v2 mode: hide the on-device (PanaAC v1) climate + Swing V/H selects
   supports_cool: true
   supports_heat: true
   supports_fan_only: true
@@ -122,7 +123,11 @@ panaac_v2:
 ```
 
 Adjust `topic_prefix` if you run multiple units. Omit `sensor` if you do not have
-a room temperature sensor connected to the ESP8266.
+a room temperature sensor connected to the ESP8266. Set `hide_legacy_comps: true`
+(v2 mode only) to hide the on-device `(PanaAC v1)` climate + Swing V/H selects from
+Home Assistant — the full-featured v2 climate card is provided by the PanaAC v2 HA
+custom integration over MQTT, so the legacy entities would only duplicate it. It has
+no effect in v1 mode, where the climate + selects are the user-facing entities.
 
 ## Climate automations
 

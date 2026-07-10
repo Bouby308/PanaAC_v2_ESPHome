@@ -86,6 +86,7 @@ restores the entity immediately after an HA restart.
 | Key | Default | Effect |
 |-----|---------|--------|
 | `topic_prefix` | _(unset → v1 mode)_ | Set to enable v2 MQTT mode. |
+| `hide_legacy_comps` | false | v2 mode only: make the on-device `(PanaAC v1)` climate + Swing V/H selects `internal` so they are hidden from Home Assistant (the v2 climate card comes from the HA custom integration over MQTT). No effect in v1 mode — the climate + selects stay visible. |
 | `receiver_id` / `transmitter_id` | required | The `remote_receiver` / `remote_transmitter` ids. |
 | `supports_cool` / `supports_heat` / `supports_fan_only` | true/false | Advertise those HVAC modes. |
 | `supports_quiet` | false | Add the Quiet fan level. |

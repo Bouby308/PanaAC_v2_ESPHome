@@ -84,6 +84,10 @@ panaac_v2:
   id: panaac_v2_climate
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
+  # hide_legacy_comps has NO effect in v1 mode (no topic_prefix): the climate + selects are the
+  # user-facing entities here and are always kept visible. It only hides them in v2 mode, where
+  # the PanaAC v2 HA custom integration provides the climate card over MQTT instead.
+  # hide_legacy_comps: true
   supports_cool: true
   supports_heat: true
   supports_fan_only: true
