@@ -50,8 +50,8 @@ namespace esphome::panaac_v2 {
  *   `USE_MQTT` is defined): the climate is exposed over the custom
  *   `<prefix>/state|traits|availability|set` MQTT JSON topics consumed by the PanaAC v2 HA custom
  *   integration (the single all-in-one v2 climate card). It is ALSO kept visible on the native
- *   API as a "(PanaAC v1)" climate — standard swing modes + custom fan-level strings + the same
- *   two `(PanaAC v1)` Swing V/H selects — at the root of the ESPHome device, exactly like PanaAC
+ *   API as a "(v1)" climate — standard swing modes + custom fan-level strings + the same
+ *   two Swing V/H selects — at the root of the ESPHome device, exactly like PanaAC
  *   v1. The custom MQTT topics are independent of the native ClimateTraits (publish_traits_() is
  *   hand-rolled JSON), so the v2 HA-integration card is unaffected by the visible native climate.
  *

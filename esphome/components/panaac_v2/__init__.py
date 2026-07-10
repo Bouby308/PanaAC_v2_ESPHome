@@ -79,11 +79,11 @@ CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
 
 
 async def _make_select(select_id, config, name, icon, parent, hide=False):
-    """Create one companion select with the (PanaAC v1) name suffix, an icon, and (if the
-    climate block set device_id) the same sub-device so it groups with the climate. Options are
-    filled at runtime in PanaACV2Climate::setup(). Without device_id the select sits at the root
-    of the ESPHome device, exactly like PanaAC_ESPHome. When hide is true the select is made
-    internal (hidden from the native API / Home Assistant)."""
+    """Create one companion select with an icon, and (if the climate block set device_id) the
+    same sub-device so it groups with the climate. Options are filled at runtime in
+    PanaACV2Climate::setup(). Without device_id the select sits at the root of the ESPHome device,
+    exactly like PanaAC_ESPHome. When hide is true the select is made internal (hidden from the
+    native API / Home Assistant)."""
     cfg = {CONF_ID: select_id, CONF_NAME: name, CONF_ICON: icon, CONF_DISABLED_BY_DEFAULT: False}
     if CONF_DEVICE_ID in config:  # optional issue #15 sub-device grouping
         cfg[CONF_DEVICE_ID] = config[CONF_DEVICE_ID]
@@ -106,21 +106,20 @@ async def to_code(config):
     if mqtt_enabled:
         config.pop(CONF_MQTT_ID, None)
 
-    # hide_legacy_comps hides the on-device "(PanaAC v1)" climate + its Swing V/H selects from the
+    # hide_legacy_comps hides the on-device "(v1)" climate + its Swing V/H selects from the
     # native API (and so from Home Assistant) so they do not duplicate the full PanaAC v2 climate
     # card that the PanaAC v2 HA custom integration exposes over MQTT. It only takes effect in v2
     # mode (topic_prefix set): in v1 mode the climate + selects ARE the user-facing entities and
     # must stay visible, so the flag is forced off there regardless of its YAML value.
     hide_legacy = config[CONF_HIDE_LEGACY_COMPS] and mqtt_enabled
 
-    # Append the "(PanaAC v1)" suffix to the climate name so the on-device climate reads as one
-    # coherent v1 set with its two companion selects ("Swing Vertical/Horizontal (PanaAC v1)") and
-    # is never mistaken for the full PanaAC v2 climate card (which in v2 mode comes from the
-    # PanaAC v2 HA custom integration over MQTT). Applied in BOTH modes, before new_climate()
-    # so the entity name and object_id hash both reflect the suffixed name.
+    # Append the "(v1)" suffix to the climate name so the on-device climate is never mistaken for
+    # the full PanaAC v2 climate card (which in v2 mode comes from the PanaAC v2 HA custom
+    # integration over MQTT). Applied in BOTH modes, before new_climate() so the entity name and
+    # object_id hash both reflect the suffixed name.
     climate_name = config.get(CONF_NAME) or ""
-    if "(PanaAC v1)" not in climate_name:
-        config[CONF_NAME] = f"{climate_name} (PanaAC v1)".strip()
+    if "(v1)" not in climate_name:
+        config[CONF_NAME] = f"{climate_name} (v1)".strip()
 
     # Hiding is done by setting the standard `internal` entity flag before the climate/selects
     # are registered: internal entities are skipped by the api and mqtt components, so they never
@@ -138,8 +137,8 @@ async def to_code(config):
     cg.add(var.set_mqtt_enabled(mqtt_enabled))
     if mqtt_enabled:
         cg.add(var.set_topic_prefix(config[CONF_TOPIC_PREFIX]))
-        # The on-device "(PanaAC v1)" climate stays VISIBLE on the native API alongside the
-        # two "(PanaAC v1)" Swing V/H selects, at the root of the ESPHome device — exactly like
+        # The on-device "(v1)" climate stays VISIBLE on the native API alongside the
+        # two Swing V/H selects, at the root of the ESPHome device — exactly like
         # PanaAC v1 — UNLESS hide_legacy_comps is true (v2 mode), in which case all three are made
         # internal above/below and hidden from Home Assistant. The full-featured PanaAC v2 climate
         # card is still provided by the PanaAC v2 HA custom integration over the custom MQTT topics
@@ -162,10 +161,10 @@ async def to_code(config):
     # Companion Swing V/H selects (PanaAC v1 features), created in BOTH modes — the granular swing
     # positions are not on the climate card. Fan levels are NOT a select: they are the climate's
     # custom fan modes (Fan Mode) in both modes, so no Fan Level select is created.
-    swingv = await _make_select(config[CONF_SWINGV_ID], config, "Swing Vertical (PanaAC v1)",
-                                "mdi:arrow-split-vertical", var, hide=hide_legacy)
+    swingv = await _make_select(config[CONF_SWINGV_ID], config, "Swing Vertical",
+                                "mdi:arrow-expand-vertical", var, hide=hide_legacy)
     cg.add(var.set_swingv(swingv))
     if config[CONF_SWING_HORIZONTAL]:
-        swingh = await _make_select(config[CONF_SWINGH_ID], config, "Swing Horizontal (PanaAC v1)",
-                                    "mdi:arrow-split-horizontal", var, hide=hide_legacy)
+        swingh = await _make_select(config[CONF_SWINGH_ID], config, "Swing Horizontal",
+                                    "mdi:arrow-expand-horizontal", var, hide=hide_legacy)
         cg.add(var.set_swingh(swingh))

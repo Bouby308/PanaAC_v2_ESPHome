@@ -279,7 +279,7 @@ void PanaACV2Climate::sync_to_climate_() {
   if (this->mqtt_enabled_) {
     this->custom_swing_mode_ = swing_v_pos_to_str(ac_state.swing_v_pos);
     this->swing_horizontal_mode_ = this->swing_horizontal_ ? swing_h_pos_to_str(ac_state.swing_h_pos) : nullptr;
-    // The visible "(PanaAC v1)" climate card advertises the standard swing modes, so mirror
+    // The visible "(v1)" climate card advertises the standard swing modes, so mirror
     // ac_state.swing_mode (derived from the v/h positions by recompute_swing_mode_()) into the
     // Climate base field so the card reflects the current swing state.
     this->swing_mode = ac_state.swing_mode;
@@ -396,7 +396,7 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_swing_mode().has_value()) {
-    // Standard swing modes are handled in BOTH modes — the visible "(PanaAC v1)" climate card
+    // Standard swing modes are handled in BOTH modes — the visible "(v1)" climate card
     // has the same Off/Vertical/Horizontal/Both swing controls as PanaAC v1 (the granular swing
     // positions still live on the Swing V/H selects / the v2 MQTT topics). The v2 MQTT set path
     // never reaches here: it applies the Panasonic swing position strings directly in

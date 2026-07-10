@@ -27,7 +27,7 @@ class PanaACV2Climate;
 
 /// Companion `select` entities that expose the granular Panasonic swing positions that the
 /// standard Climate swing enum can't represent. These are created in BOTH v1 (native) and v2
-/// (MQTT) modes — they are the "PanaAC v1" controls, namespaced with a "(PanaAC v1)" suffix. Each
+/// (MQTT) modes — they are the "PanaAC v1" controls (named "Swing Vertical"/"Swing Horizontal"). Each
 /// `control()` delegates to the parent climate, which mutates the canonical `ac_state`,
 /// transmits the IR frame, publishes, and re-syncs the other select.
 /// (Fan levels are NOT a select — they are the climate's custom fan modes.)

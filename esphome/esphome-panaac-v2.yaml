@@ -19,7 +19,7 @@ esp8266:
 # Enable logging
 logger:
 
-# Native Home Assistant API — exposes the "(PanaAC v1)" climate and the two "(PanaAC v1)"
+# Native Home Assistant API — exposes the "(v1)" climate and the two
 # Swing V/H selects at the root of the ESPHome device, exactly like PanaAC v1. The full-featured
 # v2 climate card comes from the PanaAC v2 HA custom integration over MQTT (separate device).
 api:
@@ -52,7 +52,7 @@ mqtt:
   password: !secret mqtt_pass
   # Discovery is OFF: the full-featured v2 climate is exposed via the PanaAC v2 HA custom
   # integration over the panaac_v2/<prefix>/... topics (not via standard MQTT discovery, which
-  # would create a duplicate climate). The "(PanaAC v1)" climate and the two "(PanaAC v1)"
+  # would create a duplicate climate). The "(v1)" climate and the two
   # Swing V/H selects are exposed via the native API (see `api:` above) — ESPHome only
   # MQTT-discovers platform entities, not programmatically-created selects, so the native API is
   # their transport.
@@ -93,12 +93,12 @@ panaac_v2:
   transmitter_id: ir_transmitter
   # Setting topic_prefix enables v2 MQTT mode: the full-featured v2 climate is exposed over the
   # custom panaac_v2/<prefix>/... MQTT JSON topics (consumed by the PanaAC v2 HA custom
-  # integration). The "(PanaAC v1)" climate and the two "(PanaAC v1)" Swing V/H selects are ALSO
+  # integration). The "(v1)" climate and the two Swing V/H selects are ALSO
   # created and kept visible on the native API, at the root of the ESPHome device (no sub-device),
   # exactly like PanaAC v1. The v2 custom topics are independent of the native ClimateTraits, so
   # the v2 HA card is unaffected.
   topic_prefix: "panaac_v2/${device_name}"
-  # hide_legacy_comps (v2 mode only): when true the on-device "(PanaAC v1)" climate + its two
+  # hide_legacy_comps (v2 mode only): when true the on-device "(v1)" climate + its two
   # Swing V/H selects are made `internal` and hidden from Home Assistant (the v2 climate card
   # comes from the PanaAC v2 HA custom integration over MQTT, so they would only duplicate it).
   # Set to false (the default) to keep them visible on the native API. In v1 mode the flag is

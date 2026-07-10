@@ -4,17 +4,17 @@
 
 This component has two modes, picked by whether you set `topic_prefix`:
 
-- **v1 native mode** — omit `topic_prefix`. Native `climate` (named `"<name> (PanaAC v1)"`) whose
+- **v1 native mode** — omit `topic_prefix`. Native `climate` (named `"<name> (v1)"`) whose
   Fan Mode carries the full fan levels (Auto / Level 1…5 / Quiet) + two Swing V/H `select`
   entities via the ESPHome native API (`api:`) / standard MQTT discovery. **No MQTT broker
   required.** Use `esphome/esphome-panaac-v2-v1mode.yaml` as the starting point. Behaves like
   PanaAC v1.
 - **v2 MQTT mode** — set `topic_prefix` and add a `mqtt:` block. The full-featured climate is
   exposed over the custom MQTT JSON topics (PanaAC v2 HA custom integration, single all-in-one
-  card); the on-device `"<name> (PanaAC v1)"` climate + two `(PanaAC v1)` Swing V/H selects are
+  card); the on-device `"<name> (v1)"` climate + two Swing V/H selects are
   **also kept visible** on the native API. Use `esphome/esphome-panaac-v2.yaml`.
 
-In both modes the `"<name> (PanaAC v1)"` climate and the two `(PanaAC v1)` Swing V/H selects
+In both modes the `"<name> (v1)"` climate and the two Swing V/H selects
 are created at the root of the ESPHome device, exactly like PanaAC_ESPHome. Optionally set
 `device_id` (and define the sub-device under `esphome.devices`) to regroup them under a named
 sub-device (issue #15).
@@ -112,7 +112,7 @@ panaac_v2:
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
   topic_prefix: "panaac_v2/esphome-panaac-v2"
-  hide_legacy_comps: true  # v2 mode: hide the on-device (PanaAC v1) climate + Swing V/H selects
+  hide_legacy_comps: true  # v2 mode: hide the on-device (v1) climate + Swing V/H selects
   supports_cool: true
   supports_heat: true
   supports_fan_only: true
@@ -126,7 +126,7 @@ panaac_v2:
 
 Adjust `topic_prefix` if you run multiple units. Omit `sensor` if you do not have
 a room temperature sensor connected to the ESP8266. Set `hide_legacy_comps: true`
-(v2 mode only) to hide the on-device `(PanaAC v1)` climate + Swing V/H selects from
+(v2 mode only) to hide the on-device `(v1)` climate + Swing V/H selects from
 Home Assistant — the full-featured v2 climate card is provided by the PanaAC v2 HA
 custom integration over MQTT, so the legacy entities would only duplicate it. It has
 no effect in v1 mode, where the climate + selects are the user-facing entities.

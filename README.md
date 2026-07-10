@@ -5,7 +5,7 @@ selected by whether you set `topic_prefix` on the `panaac_v2:` block:
 
 - **v1 native mode** (`topic_prefix` omitted) — behaves like the original
   [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome): a native `climate`
-  entity (named `"<name> (PanaAC v1)"`) whose **Fan Mode** offers the full Panasonic fan levels
+  entity (named `"<name> (v1)"`) whose **Fan Mode** offers the full Panasonic fan levels
   (Auto / Level 1…5 / Quiet) as custom fan modes, plus **two companion `select` entities** —
   Swing Vertical, Swing Horizontal — for the granular swing positions. Exposed via the ESPHome
   native API (`api:`) and/or standard MQTT discovery. **No MQTT broker is required** — all v2
@@ -17,7 +17,7 @@ selected by whether you set `topic_prefix` on the `panaac_v2:` block:
   MQTT JSON topics consumed by the
   [PanaAC v2 HA custom integration](https://github.com/hoangminh1109/PanaAC_v2_HA), showing
   every fan level / swing position / horizontal-swing axis on a single climate card. The same
-  on-device `"<name> (PanaAC v1)"` climate + two `(PanaAC v1)` Swing V/H selects are **also kept
+  on-device `"<name> (v1)"` climate + two Swing V/H selects are **also kept
   visible** on the native API, at the root of the ESPHome device — exactly like PanaAC v1 (the
   v2 HA integration's climate is a separate device).
 
@@ -30,16 +30,16 @@ Default device YAML assumes a Wemos D1 mini / ESP8266 with non-invasive wiring:
 - **GPIO14 (D5)** — IR receiver (TSOP38xxx) data pin, inverted
 - **GPIO13 (D7)** — IR LED anode via transistor (38 kHz carrier when `ir_control: true`)
 
-## The `(PanaAC v1)` selects
+## The Swing V/H selects
 
-Created in **both** modes (named with a `(PanaAC v1)` suffix). Fan levels are **not** a select —
-they are the climate's **Fan Mode** (custom fan modes: Auto / Level 1…5 / Quiet). Only the swing
-positions need selects (the standard Climate swing enum can't represent them):
+Created in **both** modes (named "Swing Vertical" / "Swing Horizontal"). Fan levels are **not** a
+select — they are the climate's **Fan Mode** (custom fan modes: Auto / Level 1…5 / Quiet). Only
+the swing positions need selects (the standard Climate swing enum can't represent them):
 
 | Select | Options |
 |--------|---------|
-| Swing Vertical (PanaAC v1) | Auto, Highest, High, Middle, Low, Lowest |
-| Swing Horizontal (PanaAC v1) | Auto, Left Max, Left, Middle, Right, Right Max (when `swing_horizontal`) |
+| Swing Vertical | Auto, Highest, High, Middle, Low, Lowest |
+| Swing Horizontal | Auto, Left Max, Left, Middle, Right, Right Max (when `swing_horizontal`) |
 
 By default the climate and the two selects sit at the root of the ESPHome device (no
 sub-device), exactly like PanaAC_ESPHome. Optionally set `device_id` on the `panaac_v2:` block
@@ -88,7 +88,7 @@ retained so HA restores the entity immediately after an HA restart.
 | Key | Default | Effect |
 |-----|---------|--------|
 | `topic_prefix` | _(unset → v1 mode)_ | Set to enable v2 MQTT mode. |
-| `hide_legacy_comps` | false | v2 mode only: make the on-device `(PanaAC v1)` climate + Swing V/H selects `internal` so they are hidden from Home Assistant (the v2 climate card comes from the HA custom integration over MQTT). No effect in v1 mode — the climate + selects stay visible. |
+| `hide_legacy_comps` | false | v2 mode only: make the on-device `(v1)` climate + Swing V/H selects `internal` so they are hidden from Home Assistant (the v2 climate card comes from the HA custom integration over MQTT). No effect in v1 mode — the climate + selects stay visible. |
 | `receiver_id` / `transmitter_id` | required | The `remote_receiver` / `remote_transmitter` ids. |
 | `supports_cool` / `supports_heat` / `supports_fan_only` | true/false | Advertise those HVAC modes. |
 | `supports_quiet` | false | Add the Quiet fan level. |

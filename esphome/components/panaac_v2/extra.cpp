@@ -22,7 +22,7 @@ namespace esphome::panaac_v2 {
 // ---------------- PanaACV2SwingV ----------------
 
 void PanaACV2SwingV::dump_config() {
-  ESP_LOGCONFIG(TAG, "PanaACV2SwingV (PanaAC v1):");
+  ESP_LOGCONFIG(TAG, "PanaACV2SwingV:");
   LOG_SELECT("  Swing Vertical: ", "swingv", this);
 }
 
@@ -40,7 +40,7 @@ void PanaACV2SwingV::set_swingvpos(SwingVPos swingvpos) {
 // ---------------- PanaACV2SwingH ----------------
 
 void PanaACV2SwingH::dump_config() {
-  ESP_LOGCONFIG(TAG, "PanaACV2SwingH (PanaAC v1):");
+  ESP_LOGCONFIG(TAG, "PanaACV2SwingH:");
   LOG_SELECT("  Swing Horizontal: ", "swingh", this);
 }
 

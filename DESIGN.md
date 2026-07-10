@@ -6,13 +6,13 @@ This branch unifies PanaAC v1 and v2 behind one component, switched by `topic_pr
 
 - **v1 native mode** (`topic_prefix` unset, `USE_MQTT` undefined): native `climate` whose Fan Mode
   carries the full Panasonic fan levels (Auto / Level 1…5 / Quiet) as custom fan modes (named
-  `"<name> (PanaAC v1)"`) + two `select` entities (Swing Vertical / Swing Horizontal) over the
+  `"<name> (v1)"`) + two `select` entities (Swing Vertical / Swing Horizontal) over the
   ESPHome native API / standard MQTT discovery. No broker required. Climate + selects sit at the
   root of the ESPHome device, like PanaAC v1 (optionally grouped under a `device_id` sub-device —
   issue #15).
 - **v2 MQTT mode** (`topic_prefix` set, `USE_MQTT` defined): the full-featured v2 climate is
   exposed over the custom `<prefix>/...` MQTT JSON topics (PanaAC v2 HA custom integration,
-  single card). The same on-device `"<name> (PanaAC v1)"` climate + two `(PanaAC v1)` Swing V/H
+  single card). The same on-device `"<name> (v1)"` climate + two Swing V/H
   selects are ALSO kept visible on the native API, at the root of the ESPHome device — exactly
   like PanaAC v1. The native climate carries the standard swing modes (Off/Vertical/Horizontal/
   Both) so its card looks/behaves like PanaAC v1; the granular swing POSITIONS still live on the

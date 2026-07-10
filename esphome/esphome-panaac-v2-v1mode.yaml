@@ -75,8 +75,8 @@ sensor:
 
 # v1 native mode: NO topic_prefix. The component behaves like PanaAC v1 — a native climate
 # whose Fan Mode carries the full Panasonic fan levels (Auto / Level 1..5 / Quiet, named
-# "<name> (PanaAC v1)") plus the two (PanaAC v1) Swing V/H selects, all at the root of the
-# ESPHome device (no sub-device), exactly like PanaAC_ESPHome. The "(PanaAC v1)" name suffix is
+# "<name> (v1)") plus the two Swing V/H selects, all at the root of the
+# ESPHome device (no sub-device), exactly like PanaAC_ESPHome. The "(v1)" name suffix is
 # added by the component in both modes. (Optionally set `device_id` + an `esphome.devices`
 # sub-device to regroup them under a named sub-device — issue #15.)
 panaac_v2:
