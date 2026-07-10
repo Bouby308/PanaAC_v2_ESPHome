@@ -126,6 +126,7 @@ class PanaACV2Climate : public climate::Climate,
   std::string state_topic_() const { return this->topic_prefix_ + "/state"; }
   std::string traits_topic_() const { return this->topic_prefix_ + "/traits"; }
   std::string set_topic_() const { return this->topic_prefix_ + "/set"; }
+  std::string availability_topic_() const { return this->topic_prefix_ + "/availability"; }
 #endif
 
   std::string topic_prefix_;

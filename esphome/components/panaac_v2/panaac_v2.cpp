@@ -105,6 +105,22 @@ void PanaACV2Climate::setup() {
   if (this->mqtt_enabled_) {
 #ifdef USE_MQTT
     this->subscribe_json(this->set_topic_(), &PanaACV2Climate::on_set_json_);
+
+    // Auto-configure the MQTT availability (birth / last-will / shutdown) on the PanaAC v2
+    // availability topic so the PanaAC v2 HA custom integration reliably sees online/offline
+    // (incl. broker restart, device crash, and graceful shutdown) WITHOUT the user having to set
+    // birth_message/will_message/shutdown_message in the `mqtt:` block. This runs in setup(),
+    // before the MQTT client connects in loop(), so the last-will is part of the CONNECT packet.
+    // It overrides anything ESPHome defaulted (to the mqtt component's `<prefix>/status`) or the
+    // user set in the `mqtt:` block — in v2 mode this component owns the availability topic.
+    // global_mqtt_client is assigned in the MQTTClientComponent constructor, which the generated
+    // setup() runs before App.setup() dispatches this component's setup(), so it is non-null here.
+    if (mqtt::global_mqtt_client != nullptr) {
+      const std::string avail_topic = this->availability_topic_();
+      mqtt::global_mqtt_client->set_last_will(mqtt::MQTTMessage{avail_topic, "offline", 0, true});
+      mqtt::global_mqtt_client->set_birth_message(mqtt::MQTTMessage{avail_topic, "online", 0, true});
+      mqtt::global_mqtt_client->set_shutdown_message(mqtt::MQTTMessage{avail_topic, "offline", 0, true});
+    }
 #endif
   }
   if (this->sensor_ != nullptr) {

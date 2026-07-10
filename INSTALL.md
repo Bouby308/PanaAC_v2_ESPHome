@@ -79,6 +79,8 @@ mqtt:
   username: !secret mqtt_user
   password: !secret mqtt_pass
   discovery: false
+  # No birth_message/will_message/shutdown_message here — the panaac_v2 component
+  # auto-configures the MQTT availability on <prefix>/availability in v2 mode.
 
 remote_receiver:
   pin:

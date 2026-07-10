@@ -58,8 +58,10 @@ With `topic_prefix: panaac_v2/esphome-panaac-v2`:
 | Subscribe | `panaac_v2/esphome-panaac-v2/set` | — | JSON command (partial) |
 
 `availability` uses MQTT birth/last-will **and** a `shutdown_message` so HA sees `offline` on
-graceful ESPHome restarts too (not only hard crashes). `state` and `traits` are retained so HA
-restores the entity immediately after an HA restart.
+graceful ESPHome restarts too (not only hard crashes). In v2 mode the panaac_v2 component
+auto-configures all three on the `<prefix>/availability` topic (no `birth_message` /
+`will_message` / `shutdown_message` needed in the `mqtt:` block). `state` and `traits` are
+retained so HA restores the entity immediately after an HA restart.
 
 ## State / command JSON (v2 mode)
 
@@ -100,7 +102,8 @@ restores the entity immediately after an HA restart.
 ## Example configs
 
 - [`esphome/esphome-panaac-v2.yaml`](esphome/esphome-panaac-v2.yaml) — **v2 MQTT mode**
-  (`topic_prefix` + `mqtt:` + birth/will/shutdown_message + `api:` for the selects).
+  (`topic_prefix` + `mqtt:` broker/auth/discovery + `api:` for the selects; the component
+  auto-configures the MQTT availability, so no birth/will/shutdown_message is needed).
 - [`esphome/esphome-panaac-v2-v1mode.yaml`](esphome/esphome-panaac-v2-v1mode.yaml) — **v1
   native mode** (`api:`, no `topic_prefix`, no `mqtt:` required, `device_id` grouping demo).
 

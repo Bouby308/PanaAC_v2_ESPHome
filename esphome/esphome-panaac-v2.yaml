@@ -41,9 +41,11 @@ wifi:
 
 captive_portal:
 
-# MQTT broker (the same broker used by Home Assistant).
-# Availability is driven by birth/last-will on the panaac_v2 availability topic so the
-# PanaAC v2 HA integration reliably sees online/offline (incl. broker restart / device crash).
+# MQTT broker (the same broker used by Home Assistant). Only the broker/auth/discovery need to be
+# set here — the panaac_v2 component itself auto-configures the MQTT availability (birth /
+# last-will / shutdown) on the panaac_v2/<prefix>/availability topic in v2 mode, so the PanaAC v2
+# HA integration reliably sees online/offline (incl. broker restart / device crash / graceful
+# shutdown) without any birth_message/will_message/shutdown_message here.
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_user
@@ -55,22 +57,6 @@ mqtt:
   # MQTT-discovers platform entities, not programmatically-created selects, so the native API is
   # their transport.
   discovery: false
-  birth_message:
-    topic: "panaac_v2/${device_name}/availability"
-    payload: "online"
-    retain: true
-  will_message:
-    topic: "panaac_v2/${device_name}/availability"
-    payload: "offline"
-    retain: true
-  # Published by ESPHome on a GRACEFUL shutdown (reboot / OTA / safe mode) right before the
-  # clean MQTT disconnect. The broker does NOT send the last-will on a clean disconnect, so
-  # without this HA would keep seeing "online" while the device is down. Hard crashes / power
-  # loss / WiFi drops are still caught by the last-will above (after keepalive timeout).
-  shutdown_message:
-    topic: "panaac_v2/${device_name}/availability"
-    payload: "offline"
-    retain: true
 
 # Non-invasive wiring: separate IR receiver and IR LED.
 #   GPIO14 = D5  <- IR receiver (TSOP38xxx) data pin
