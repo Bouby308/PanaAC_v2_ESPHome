@@ -98,12 +98,12 @@ panaac_v2:
   # exactly like PanaAC v1. The v2 custom topics are independent of the native ClimateTraits, so
   # the v2 HA card is unaffected.
   topic_prefix: "panaac_v2/${device_name}"
-  # Hide the on-device "(PanaAC v1)" climate + its two Swing V/H selects from Home Assistant
-  # (they are made `internal`). The full-featured v2 climate card comes from the PanaAC v2 HA
-  # custom integration over the MQTT topics above, so the legacy on-device entities would only
-  # duplicate it. Only takes effect in v2 mode (topic_prefix set); in v1 mode the climate +
-  # selects are the user-facing entities and stay visible regardless.
-  hide_legacy_comps: true
+  # hide_legacy_comps (v2 mode only): when true the on-device "(PanaAC v1)" climate + its two
+  # Swing V/H selects are made `internal` and hidden from Home Assistant (the v2 climate card
+  # comes from the PanaAC v2 HA custom integration over MQTT, so they would only duplicate it).
+  # Set to false (the default) to keep them visible on the native API. In v1 mode the flag is
+  # ignored and the climate + selects are always visible.
+  hide_legacy_comps: false
   supports_cool: true
   supports_heat: true
   supports_fan_only: true
