@@ -1,6 +1,14 @@
 # Codex Review
 
-## Issue 1: v2 MQTT traits/state are only published once per boot
+## Re-review update (2026-07-11)
+
+Reviewed `origin/bugfix/fix-codex-findings`.
+
+Result: all four findings below appear fixed in the branch revision I reviewed. I did not identify a remaining correctness issue in the updated implementation or the aligned documentation.
+
+## ~~Issue 1: v2 MQTT traits/state are only published once per boot~~
+
+Status: fixed on `bugfix/fix-codex-findings`.
 
 **Problem**
 
@@ -19,7 +27,9 @@ Relevant code:
 
 Republish the retained bootstrap payloads on every MQTT reconnect, not only on the first boot-time connect. The cleanest fix is to track connection edges or register an MQTT reconnect callback, reset `traits_published_` on disconnect, and republish `traits` plus `state` when the broker connection comes back.
 
-## Issue 2: one JSON command can trigger two IR transmissions
+## ~~Issue 2: one JSON command can trigger two IR transmissions~~
+
+Status: fixed on `bugfix/fix-codex-findings`.
 
 **Problem**
 
@@ -39,7 +49,9 @@ Relevant code:
 
 Parse the full JSON payload into one desired target state first, apply all supported fields to the canonical state in memory, and then emit at most one publish/transmit cycle if anything actually changed. That keeps the MQTT command path atomic and avoids redundant IR bursts.
 
-## Issue 3: `topic_prefix` enables v2 mode without validating that `mqtt:` exists
+## ~~Issue 3: `topic_prefix` enables v2 mode without validating that `mqtt:` exists~~
+
+Status: fixed on `bugfix/fix-codex-findings`.
 
 **Problem**
 
@@ -59,7 +71,9 @@ Relevant code:
 
 Add config validation that fails generation when `topic_prefix` is set but the global `mqtt:` component is not configured. This should be a build-time error, not a runtime log message.
 
-## Issue 4: repository documentation disagrees with the implemented MQTT state contract
+## ~~Issue 4: repository documentation disagrees with the implemented MQTT state contract~~
+
+Status: fixed on `bugfix/fix-codex-findings`.
 
 **Problem**
 
