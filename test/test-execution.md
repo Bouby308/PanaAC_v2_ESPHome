@@ -24,14 +24,14 @@ its `Result:` line and commit this file to the `testing/full-test` branch.
   `test/test-execution.md` to bring it up.
 
 All `esphome` commands run from the workspace `esphome/` dir:
-`cd /home/hoangminh/AgentsWork/Claude/HA/esphome`.
+`cd /home/hoangminh/AgentsWork/Codex/HA/esphome`.
 
 ## Variant YAMLs (Group 1)
 
-Create one YAML per row C1–C6 in `test-specification.md` §1.1 by copying
-`esphome/esphome-panaac-v2.yaml` and editing only the listed keys. Keep
-`wifi`, `mqtt`, `remote_receiver/transmitter`, and `api`/`ota` blocks. Put
-them at `test/variants/C1.yaml` … `test/variants/C6.yaml` (create the dir).
+The variant YAMLs already exist at `test/variants/C1.yaml` …
+`test/variants/C6.yaml`, plus `test/variants/C3-automation.yaml` for Group 3.
+They were derived from `esphome/esphome-panaac-v2.yaml` and only change the
+keys listed in `test-specification.md` §1.1.
 
 For a config-only (no hardware) check you may drop `mqtt`/`wifi` pins, but keep
 `remote_receiver`/`remote_transmitter` pin blocks so the component loads.
