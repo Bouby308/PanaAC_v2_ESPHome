@@ -77,8 +77,7 @@ sensor:
 # whose Fan Mode carries the full Panasonic fan levels (Auto / Level 1..5 / Quiet, named
 # "<name> (v1)") plus the two Swing V/H selects, all at the root of the
 # ESPHome device (no sub-device), exactly like PanaAC_ESPHome. The "(v1)" name suffix is
-# added by the component in both modes. (Optionally set `device_id` + an `esphome.devices`
-# sub-device to regroup them under a named sub-device — issue #15.)
+# added by the component in both modes.
 panaac_v2:
   name: "Remote Controller"
   id: panaac_v2_climate
