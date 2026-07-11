@@ -114,6 +114,7 @@ class PanaACV2Climate : public climate::Climate,
   void update_selects_();          // push ac_state fan/swing positions to the select entities
   void publish_state_by_mode_();   // v2: MQTT publish_state_() + publish_state(); v1: publish_state()
   void recompute_swing_mode_();    // derive ac_state.swing_mode from swing_v_pos / swing_h_pos
+  void update_action_();           // derive Climate action from the commanded mode (one-way IR)
 
 #ifdef USE_MQTT
   // v2 MQTT publish helpers (only used when mqtt_enabled_).
