@@ -15,9 +15,7 @@ This component has two modes, picked by whether you set `topic_prefix`:
   **also kept visible** on the native API. Use `esphome/esphome-panaac-v2.yaml`.
 
 In both modes the `"<name> (v1)"` climate and the two Swing V/H selects
-are created at the root of the ESPHome device, exactly like PanaAC_ESPHome. Optionally set
-`device_id` (and define the sub-device under `esphome.devices`) to regroup them under a named
-sub-device (issue #15).
+are created at the root of the ESPHome device, exactly like PanaAC_ESPHome.
 
 ## What you need
 

@@ -45,7 +45,7 @@ namespace esphome::panaac_v2 {
  *   plus two companion `select` entities (Swing Vertical / Swing Horizontal) for the granular swing
  *   positions. Behaves like PanaAC v1. No MQTT broker is required — all MQTT code is compiled out
  *   (`USE_MQTT` undefined). The climate + selects sit at the root of the ESPHome device, like
- *   PanaAC v1 (optionally regrouped under a `device_id` sub-device).
+ *   PanaAC v1.
  * - **v2 MQTT mode** (`topic_prefix` set, `mqtt_enabled_ = true`, requires a `mqtt:` block so
  *   `USE_MQTT` is defined): the climate is exposed over the custom
  *   `<prefix>/state|traits|availability|set` MQTT JSON topics consumed by the PanaAC v2 HA custom

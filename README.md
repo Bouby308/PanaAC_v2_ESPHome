@@ -10,8 +10,7 @@ selected by whether you set `topic_prefix` on the `panaac_v2:` block:
   Swing Vertical, Swing Horizontal — for the granular swing positions. Exposed via the ESPHome
   native API (`api:`) and/or standard MQTT discovery. **No MQTT broker is required** — all v2
   MQTT code is compiled out (`USE_MQTT` undefined). The climate + selects sit at the root of the
-  ESPHome device, exactly like PanaAC_ESPHome (optionally regroup them under a sub-device via
-  `device_id` — [issue #15](https://github.com/hoangminh1109/PanaAC_ESPHome/issues/15)).
+  ESPHome device, exactly like PanaAC_ESPHome.
 - **v2 MQTT mode** (`topic_prefix` set, requires a `mqtt:` block) — the original v2 behaviour:
   the full-featured climate is exposed over custom `<prefix>/state|traits|availability|set`
   MQTT JSON topics consumed by the
@@ -41,10 +40,8 @@ the swing positions need selects (the standard Climate swing enum can't represen
 | Swing Vertical | Auto, Highest, High, Middle, Low, Lowest |
 | Swing Horizontal | Auto, Left Max, Left, Middle, Right, Right Max (when `swing_horizontal`) |
 
-By default the climate and the two selects sit at the root of the ESPHome device (no
-sub-device), exactly like PanaAC_ESPHome. Optionally set `device_id` on the `panaac_v2:` block
-(and define the sub-device under `esphome.devices`) to regroup them under a named sub-device
-in the ESPHome WebUI / Home Assistant (issue #15).
+The climate and the two selects sit at the root of the ESPHome device (no sub-device),
+exactly like PanaAC_ESPHome.
 
 ## v2 MQTT topics
 
@@ -97,7 +94,6 @@ retained so HA restores the entity immediately after an HA restart.
 | `temp_step` | 1.0 | Visual temperature step (0.5 or 1.0). |
 | `ir_control` | false | `true` = real IR LED (38 kHz carrier); `false` = direct-wired. |
 | `sensor` | _(none)_ | Current-temperature sensor. |
-| `device_id` | _(none)_ | Sub-device id for issue #15 grouping of the selects. |
 
 ## Example configs
 
@@ -105,7 +101,7 @@ retained so HA restores the entity immediately after an HA restart.
   (`topic_prefix` + `mqtt:` broker/auth/discovery + `api:` for the selects; the component
   auto-configures the MQTT availability, so no birth/will/shutdown_message is needed).
 - [`esphome/esphome-panaac-v2-v1mode.yaml`](esphome/esphome-panaac-v2-v1mode.yaml) — **v1
-  native mode** (`api:`, no `topic_prefix`, no `mqtt:` required, `device_id` grouping demo).
+  native mode** (`api:`, no `topic_prefix`, no `mqtt:` required).
 
 Required secrets (v2 mode) in your `secrets.yaml`:
 ```yaml
@@ -121,7 +117,7 @@ mqtt_pass: "..."
 
 ```
 esphome/components/panaac_v2/
-  __init__.py      — ESPHome config schema + codegen (mode switch, selects, device_id grouping)
+  __init__.py      — ESPHome config schema + codegen (mode switch, selects)
   panaac_v2.h      — component class declaration
   panaac_v2.cpp    — climate logic, Panasonic IR encode/decode, v2 MQTT pub/sub (#ifdef USE_MQTT)
   extra.h/.cpp     — the two companion Swing V/H select entities
