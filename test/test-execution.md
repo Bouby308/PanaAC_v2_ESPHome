@@ -1,0 +1,175 @@
+# PanaAC v2 ESPHome — test execution instructions
+
+How to run the tests in `test-specification.md`. Record each step's outcome on
+its `Result:` line and commit this file to the `testing/full-test` branch.
+
+## Prerequisites
+
+- Workspace ESPHome venv with the esphome CLI built from the local platform
+  source: `esphome/.venv/bin/esphome` (version 2026.8.x-dev). See
+  `esphome/DEV_ENVIRONMENT.md`.
+- The `panaac_v2` component is the local source under
+  `esphome/PanaAC_v2_ESPHome/esphome/components/panaac_v2/` (referenced by the
+  test YAMLs via `external_components`/`custom_components` — check the example
+  YAML's `external_components` source path).
+- A real ESP8266 (d1_mini) with IR receiver (GPIO14/D5) + IR LED (GPIO13/D7),
+  pointed at a Panasonic AC. USB-serial or OTA access for flashing.
+- Local mosquitto broker: `127.0.0.1:1883` from WSL, `mqtt_user`/`mqtt_pass`.
+  Start it (sudo password `mnhmnh`): `echo 'mnhmnh' | sudo -S systemctl start
+  mosquitto`. The device reaches the broker at the host LAN IP `10.105.1.86`
+  (verify with `ip -4 -br addr show eth2`; a Windows Firewall rule for TCP
+  1883 must exist — see memory `local-mosquitto-broker`).
+- A Home Assistant dev instance with the `PanaAC_v2_HA` integration configured
+  for the same topic prefix (for the Group 2 cross-check). See the HA repo's
+  `test/test-execution.md` to bring it up.
+
+All `esphome` commands run from the workspace `esphome/` dir:
+`cd /home/hoangminh/AgentsWork/Claude/HA/esphome`.
+
+## Variant YAMLs (Group 1)
+
+Create one YAML per row C1–C6 in `test-specification.md` §1.1 by copying
+`esphome/esphome-panaac-v2.yaml` and editing only the listed keys. Keep
+`wifi`, `mqtt`, `remote_receiver/transmitter`, and `api`/`ota` blocks. Put
+them at `test/variants/C1.yaml` … `test/variants/C6.yaml` (create the dir).
+
+For a config-only (no hardware) check you may drop `mqtt`/`wifi` pins, but keep
+`remote_receiver`/`remote_transmitter` pin blocks so the component loads.
+
+## Group 1 — Configuration combinations
+
+For each variant `V` in C1..C6:
+
+```
+.venv/bin/esphome config  PanaAC_v2_ESPHome/test/variants/V.yaml   # must exit 0
+.venv/bin/esphome compile PanaAC_v2_ESPHome/test/variants/V.yaml   # must exit 0
+```
+
+Then verify traits/topics without flashing — use a compile + inspect the
+generated `dump_config`, and for v2 variants start the firmware once on
+hardware (or a stub) and read the retained `traits` from the broker:
+
+```
+mosquitto_sub -h 127.0.0.1 -u mqtt_user -P mqtt_pass -t 'panaac_v2/+/traits' -C 1
+```
+
+Compare the payload to `test-specification.md` §1.2 and §1.3.
+
+Result C1: …  Result C2: …  Result C3: …  Result C4: …  Result C5: …  Result C6: …
+
+## Flashing the device (needed for Groups 2 & 3)
+
+Flash once with the variant **C3** reference config (the full-feature set):
+
+```
+.venv/bin/esphome run PanaAC_v2_ESPHome/test/variants/C3.yaml
+```
+
+`esphome run` compiles, then uploads over the chosen method (OTA if the device
+is already on the network, else USB-serial via `--device /dev/ttyUSB0` — see
+memory `wsl-windows-esptool-flash` for the WSL USB-serial path). Watch the
+serial/log until `WiFi connected` and `MQTT connected`.
+
+## Group 2 — Two-way MQTT with HA
+
+Subscribe to all DUT topics in one terminal (leave it running):
+
+```
+mosquitto_sub -h 127.0.0.1 -u mqtt_user -P mqtt_pass -t 'panaac_v2/esphome-panaac-v2/#' -v
+```
+
+### 2.1 Device → HA
+After boot confirm retained messages arrive on `.../availability`,
+`.../traits`, `.../state` matching §2.1. Result: …
+
+### 2.2 HA → device round-trip
+For each row in §2.2, publish the command and confirm the DUT republishes
+`state` with the new value and (if HA is running) the HA climate entity
+reflects it:
+
+```
+mosquitto_pub -h 127.0.0.1 -u mqtt_user -P mqtt_pass \
+  -t panaac_v2/esphome-panaac-v2/set -m '{"mode":"cool"}'
+```
+
+To confirm the atomic-command guarantee (one IR transmit per multi-field
+`set`), enable `DEBUG` logging on the DUT (`logger: level: DEBUG`) and count
+`Transmitting`/IR-burst log lines after:
+```
+mosquitto_pub ... -m '{"mode":"cool","target_temperature":24,"fan_mode":"Level 2"}'
+```
+Expect exactly one transmit burst. Result: …
+
+### 2.3 Unsupported / malformed input
+Publish `{"preset":"ECO"}`, `{"target_humidity":50}`, `{not json`, and
+`{"mode":"cool"}` on a `supports_cool=false` variant (C1); assert no IR
+transmit and no state change (check the subscribe terminal + DUT log). Result: …
+
+## Group 3 — ESPHome climate automation
+
+Add the following to a test build of the C3 config (e.g. an extra
+`test/variants/C3-automation.yaml`) and flash it, so the on-device triggers
+and lambdas are present.
+
+```yaml
+climate:
+  - platform: panaac_v2
+    id: panaac_v2_climate
+    # ... full C3 config ...
+    on_state:
+      - logger.log: "on_state fired"
+    on_control:
+      - logger.log: "on_control fired"
+
+button:
+  - platform: template
+    name: "Control cool 24C"
+    on_press:
+      - climate.control:
+          id: panaac_v2_climate
+          mode: COOL
+          target_temperature: 24.0
+          fan_mode: AUTO
+          swing_mode: VERTICAL
+
+  - platform: template
+    name: "Lambda action log"
+    on_press:
+      - lambda: |-
+          ESP_LOGI("test", "mode=%d action=%d cur=%.1f tgt=%.1f",
+                   (int) id(panaac_v2_climate).mode,
+                   (int) id(panaac_v2_climate).action,
+                   id(panaac_v2_climate).current_temperature,
+                   id(panaac_v2_climate).target_temperature);
+```
+
+### 3.1 `climate.control`
+Press "Control cool 24C" (HA button entity or `esphome` API). Expect one IR
+transmit and a `state` republish with `mode=cool, target_temperature=24,
+fan_mode=Auto, swing_mode=Vertical`. Repeat for each param in §3.1. Result: …
+
+### 3.2 / 3.3 `on_state` / `on_control`
+Drive a change from HA MQTT `set`, from the "Control cool 24C" button, and
+from a sensor update. Check the DUT log shows `on_control` then `on_state` for
+control inputs, and `on_state` only for a temperature update. Result: …
+
+### 3.4 / 3.6 Lambda accessors & make_call
+Press "Lambda action log"; verify the logged `mode`/`action`/`cur`/`tgt`
+match the entity. Add a second template button whose `on_press` is a
+`lambda` using `make_call().perform()` (§3.6) and confirm it transmits like
+`climate.control`. Result: …
+
+### 3.5 Derived action
+For each mode (set via HA `set` or `climate.control`), press "Lambda action
+log" and assert `action` matches the table in §3.5. For AUTO: set
+`mode=auto`, `target_temperature=24`; with the room sensor reading > 24
+expect `COOLING`, < 24 expect `HEATING`, == 24 expect `IDLE`. To force the
+room reading without hardware, temporarily bind `sensor` to a template
+sensor you can set, or warm/cool the sensor. Result: …
+
+## Finishing
+
+- If any step fails, capture the DUT log (`logger` DEBUG) and the broker
+  subscribe output, and record the actual vs expected under that step.
+- Commit results to this file on the `testing/full-test` branch. Do not push
+  unless asked.
