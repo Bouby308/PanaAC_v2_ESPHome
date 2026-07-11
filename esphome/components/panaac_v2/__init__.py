@@ -15,6 +15,7 @@
 import esphome.codegen as cg
 from esphome.components import climate, remote_base, select, sensor
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome.const import (
     CONF_DEVICE_ID,
     CONF_DISABLED_BY_DEFAULT,
@@ -26,6 +27,7 @@ from esphome.const import (
     CONF_SENSOR,
 )
 from esphome.components.remote_base import CONF_RECEIVER_ID, CONF_TRANSMITTER_ID
+from esphome.types import ConfigType
 
 AUTO_LOAD = ["climate", "select"]
 DEPENDENCIES = ["remote_transmitter", "climate"]
@@ -168,3 +170,28 @@ async def to_code(config):
         swingh = await _make_select(config[CONF_SWINGH_ID], config, "Swing Horizontal",
                                     "mdi:arrow-expand-horizontal", var, hide=hide_legacy)
         cg.add(var.set_swingh(swingh))
+
+
+def _final_validate(config: ConfigType) -> ConfigType:
+    """Build-time guard for the v2 MQTT mode switch (Codex review issue 3).
+
+    `topic_prefix` enables v2 MQTT mode, which needs a global `mqtt:` block so `USE_MQTT` is
+    defined and the `CustomMQTTDevice` code path is compiled in. Without a `mqtt:` block the
+    firmware still builds, but `USE_MQTT` is undefined, all MQTT code is compiled out, and the
+    HA-facing MQTT contract never comes up — the device would only log `v2 MQTT mode requires a
+    mqtt: block` at runtime. Fail generation here instead, so the misconfiguration is caught
+    before flashing.
+    """
+    if CONF_TOPIC_PREFIX in config:
+        full_config = fv.full_config.get()
+        if not full_config.get("mqtt"):
+            raise cv.Invalid(
+                "The panaac_v2 `topic_prefix` option enables v2 MQTT mode, which requires a "
+                "global `mqtt:` block in the configuration (it defines USE_MQTT and compiles in "
+                "the MQTT code path). Add an `mqtt:` block with your broker settings, or remove "
+                "`topic_prefix` to use v1 native mode (no broker needed)."
+            )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate

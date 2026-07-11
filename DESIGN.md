@@ -87,14 +87,17 @@ Topic prefix is configurable; the default is `panaac_v2/esphome-panaac-v2`.
 |--------------|-----------|----------|---------|
 | `availability` | device → HA | yes | `online` / `offline` LWT-style |
 | `traits` | device → HA | yes | device capabilities (JSON) |
-| `state` | device → HA | no | current state (JSON) |
+| `state` | device → HA | yes | current state (JSON) |
 | `set` | HA → device | no | partial command (JSON) |
 
 ### Retained topics
 
-`traits` and `availability` are retained so that Home Assistant can build the
-climate card correctly immediately after startup, before any live state message
-arrives.
+`traits`, `availability` and `state` are retained so that Home Assistant can build
+the climate card and restore the entity's current state immediately after startup
+— including after an HA restart or a broker reconnect — before any live state
+message arrives. The device republishes the retained `traits` and `state` on
+every MQTT reconnect (see Startup behaviour) so retained-message loss or a broker
+restart cannot leave HA with a stale or empty entity.
 
 ### Traits payload
 
@@ -181,10 +184,16 @@ On `setup()` the component:
 2. waits for MQTT to be connected in `loop()`;
 3. publishes retained `availability = online`;
 4. publishes retained `traits`;
-5. publishes a non-retained `state`.
+5. publishes a retained `state`.
 
 It does **not** transmit IR on boot, so a restart cannot unexpectedly turn the
 AC off or change its settings.
+
+`loop()` tracks the MQTT connection: while disconnected it marks the retained
+bootstrap as due, and on every reconnect it republishes the retained `traits`
+and `state` (not only on the first boot-time connect). This keeps Home Assistant
+able to rebuild the entity after a broker restart, retained-message loss, or a
+late device reconnect.
 
 If a `sensor` is configured, its filtered state updates are copied into
 `current_temperature` and published in the next state message.

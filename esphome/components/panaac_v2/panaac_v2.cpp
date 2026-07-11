@@ -193,8 +193,15 @@ void PanaACV2Climate::loop() {
   if (!this->mqtt_enabled_)
     return;
 #ifdef USE_MQTT
-  if (!this->is_connected())
+  if (!this->is_connected()) {
+    // While disconnected, mark the retained bootstrap as due so the traits + state payloads are
+    // republished on the next reconnect — not only on the first boot-time connect (Codex review
+    // issue 1). This keeps Home Assistant able to rebuild the entity after a broker restart,
+    // retained-message loss, or a late device reconnect: the bootstrap runs again as soon as the
+    // broker connection comes back.
+    this->traits_published_ = false;
     return;
+  }
   if (!this->traits_published_) {
     this->publish_traits_();
     this->traits_published_ = true;
@@ -449,13 +456,22 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
 
   if (changed) {
     this->sync_to_climate_();
-    // Publish state BEFORE the (blocking ~260 ms) IR transmit so Home Assistant's climate entity
-    // reflects the change immediately; the physical IR send follows. transmit_data_() busy-waits
-    // with interrupts disabled for the whole signal, so any publish after it would lag by the
-    // full signal duration (the main lag the user saw).
-    this->publish_state_by_mode_();
-    this->update_selects_();
-    this->transmit_data_();
+    if (this->mqtt_command_active_) {
+      // A v2 MQTT set command is applying multiple fields atomically. control() is reached here
+      // via call.perform() from on_set_json_(); while mqtt_command_active_ is set it updates
+      // ac_state and records a pending change but does NOT publish or transmit, so a single MQTT
+      // command can never trigger two back-to-back IR bursts (Codex review issue 2). The single
+      // publish/transmit runs in on_set_json_() once all fields are applied.
+      this->pending_change_ = true;
+    } else {
+      // Publish state BEFORE the (blocking ~260 ms) IR transmit so Home Assistant's climate entity
+      // reflects the change immediately; the physical IR send follows. transmit_data_() busy-waits
+      // with interrupts disabled for the whole signal, so any publish after it would lag by the
+      // full signal duration (the main lag the user saw).
+      this->publish_state_by_mode_();
+      this->update_selects_();
+      this->transmit_data_();
+    }
   }
 }
 
@@ -614,9 +630,17 @@ void PanaACV2Climate::publish_traits_() {
 void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
   ESP_LOGD(TAG, "Received command on %s", topic.c_str());
 
-  auto call = this->make_call();
-  bool swing_changed = false;
+  // Apply the whole command to ac_state in memory, then emit at most ONE publish/transmit cycle
+  // if anything actually changed. While mqtt_command_active_ is set, the control() path reached
+  // via call.perform() below updates ac_state and records a pending change but does NOT publish
+  // or transmit — so a command mixing standard climate fields (mode / target_temperature /
+  // fan_mode) with Panasonic swing fields cannot trigger two back-to-back IR transmissions and
+  // two state publishes (Codex review issue 2). The swing helpers already mutate ac_state without
+  // transmitting; the single emit runs at the end.
+  this->mqtt_command_active_ = true;
+  this->pending_change_ = false;
 
+  auto call = this->make_call();
   if (root["mode"].is<const char *>()) {
     const char *v = root["mode"];
     call.set_mode(v, strlen(v));
@@ -628,12 +652,13 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
     const char *v = root["fan_mode"];
     call.set_fan_mode(v, strlen(v));
   }
-
-  // perform() -> control() applies mode/temp/fan to ac_state and transmits+p publishes if changed.
+  // perform() -> control() applies mode/temp/fan to ac_state (no transmit while active).
   call.perform();
 
-  // Panasonic-specific swing strings are handled directly (ESPHome core climate has no custom
-  // swing strings).
+  // Panasonic-specific swing strings are applied directly (ESPHome core climate has no custom
+  // swing strings); these helpers update ac_state and recompute the combined swing_mode but do
+  // not transmit.
+  bool swing_changed = false;
   if (root["swing_mode"].is<const char *>()) {
     if (this->set_swing_mode_if_supported_(root["swing_mode"]))
       swing_changed = true;
@@ -643,7 +668,9 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
       swing_changed = true;
   }
 
-  if (swing_changed) {
+  // Exactly one emit for the whole command, only if something actually changed.
+  this->mqtt_command_active_ = false;
+  if (this->pending_change_ || swing_changed) {
     this->sync_to_climate_();
     this->publish_state_by_mode_();  // reflect before the blocking IR send
     this->update_selects_();

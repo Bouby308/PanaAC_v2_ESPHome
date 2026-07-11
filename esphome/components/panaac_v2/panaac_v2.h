@@ -151,6 +151,14 @@ class PanaACV2Climate : public climate::Climate,
   const char *swing_horizontal_mode_{STR_SWINGH_MIDDLE};
 
   bool traits_published_{false};
+
+  // v2 MQTT set-command atomicity (Codex review issue 2). While mqtt_command_active_ is set,
+  // control() (reached via call.perform() from on_set_json_()) updates ac_state and records a
+  // pending change in pending_change_ but does NOT publish or transmit, so a single MQTT
+  // command mixing standard climate fields with Panasonic swing fields emits at most one IR
+  // burst. on_set_json_() performs the single publish/transmit once all fields are applied.
+  bool mqtt_command_active_{false};
+  bool pending_change_{false};
 };
 
 }  // namespace esphome::panaac_v2
