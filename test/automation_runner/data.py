@@ -105,3 +105,84 @@ VARIANT_EXPECTATIONS: dict[str, dict[str, Any]] = {
     },
 }
 
+RETAINED_REFERENCE_TRAITS = {
+    "hvac_modes": ["off", "cool", "heat", "fan_only", "dry", "auto"],
+    "fan_modes": ["Auto", "Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Quiet"],
+    "swing_modes": ["Auto", "Highest", "High", "Middle", "Low", "Lowest"],
+    "swing_horizontal_modes": ["Auto", "Left Max", "Left", "Middle", "Right", "Right Max"],
+    "min_temp": 16,
+    "max_temp": 30,
+    "temp_step": 0.5,
+    "temperature_unit": "C",
+}
+
+RETAINED_REFERENCE_STATE = {
+    "mode": "heat",
+    "target_temperature": 24,
+    "fan_mode": "Level 2",
+    "swing_mode": "Middle",
+    "swing_horizontal_mode": "Left",
+    "current_temperature": 26.5,
+    "available": True,
+}
+
+RETAINED_STATE_REQUIRED_KEYS = (
+    "mode",
+    "target_temperature",
+    "fan_mode",
+    "swing_mode",
+    "swing_horizontal_mode",
+    "current_temperature",
+    "available",
+)
+
+MQTT_SET_CASES = [
+    {
+        "id": "set_mode_cool",
+        "payload": {"mode": "cool"},
+        "expected_state": {"mode": "cool"},
+    },
+    {
+        "id": "set_target_temperature_26",
+        "payload": {"target_temperature": 26},
+        "expected_state": {"target_temperature": 26},
+    },
+    {
+        "id": "set_fan_mode_auto",
+        "payload": {"fan_mode": "Auto"},
+        "expected_state": {"fan_mode": "Auto"},
+    },
+    {
+        "id": "set_swing_mode_auto",
+        "payload": {"swing_mode": "Auto"},
+        "expected_state": {"swing_mode": "Auto"},
+    },
+    {
+        "id": "set_swing_horizontal_mode_auto",
+        "payload": {"swing_horizontal_mode": "Auto"},
+        "expected_state": {"swing_horizontal_mode": "Auto"},
+    },
+    {
+        "id": "set_mode_cool_temp23_multi",
+        "payload": {"mode": "cool", "target_temperature": 23},
+        "expected_state": {"mode": "cool", "target_temperature": 23},
+    },
+]
+
+MQTT_INVALID_CASES = [
+    {
+        "id": "unsupported_preset",
+        "payload_text": '{"preset":"ECO"}',
+        "expected": "No new state publish after unsupported preset payload",
+    },
+    {
+        "id": "unsupported_target_humidity",
+        "payload_text": '{"target_humidity":50}',
+        "expected": "No new state publish after unsupported target_humidity payload",
+    },
+    {
+        "id": "malformed_json",
+        "payload_text": '{not json',
+        "expected": "No new state publish after malformed JSON payload",
+    },
+]

@@ -16,6 +16,11 @@ from typing import Any, Callable
 
 from .data import (
     DEFAULT_TOPIC_PREFIX,
+    MQTT_INVALID_CASES,
+    MQTT_SET_CASES,
+    RETAINED_REFERENCE_STATE,
+    RETAINED_STATE_REQUIRED_KEYS,
+    RETAINED_REFERENCE_TRAITS,
     SUITE_CHOICES,
     SUITE_LABELS,
     VARIANT_EXPECTATIONS,
@@ -226,26 +231,84 @@ class Runner:
 
     def _run_esphome_group_2(self) -> GroupResult:
         group = GroupResult("esphome.g2", SUITE_LABELS["esphome.g2"])
-        status = "blocked" if self.mode == "full-hil" else "skip"
-        actual = (
-            "full-hil mode requested but DUT publish/command hooks are not implemented yet"
-            if self.mode == "full-hil"
-            else "Skipped outside full-hil mode until DUT automation is implemented"
-        )
-        for suffix, title in (
-            ("2.1", "Device publishes retained availability/traits/state"),
-            ("2.2", "Set topic command round-trip and atomic IR transmit"),
-            ("2.3", "Unsupported and malformed input handling"),
+        for suffix, topic_suffix, expected_payload in (
+            ("2.1.availability", "availability", "online"),
+            ("2.1.traits", "traits", RETAINED_REFERENCE_TRAITS),
+            ("2.1.state", "state", None),
         ):
+            started = time.monotonic()
+            actual_payload = self._read_retained_topic(topic_suffix)
+            if topic_suffix == "state":
+                status = "pass" if self._state_has_required_keys(actual_payload) else "fail"
+                expected: Any = {"required_keys": list(RETAINED_STATE_REQUIRED_KEYS), "available": True}
+            else:
+                status = "pass" if self._payload_matches(expected_payload, actual_payload) else "fail"
+                expected = expected_payload
             group.add(
                 CaseResult(
                     id=f"esphome.g{suffix}",
-                    title=title,
+                    title=f"Retained {topic_suffix} payload",
                     status=status,
-                    expected="Runner captures DUT MQTT traffic and validates live behavior",
-                    actual=actual,
+                    expected=expected,
+                    actual=actual_payload,
+                    duration_s=time.monotonic() - started,
                 )
             )
+
+        for case in MQTT_SET_CASES:
+            started = time.monotonic()
+            try:
+                self._ensure_reference_state()
+                actual_state = self._publish_set_and_capture_state(case["payload"])
+                mismatches = self._compare_expected(case["expected_state"], actual_state)
+                actual: Any = actual_state
+                evidence = {"mismatches": mismatches} if mismatches else {}
+                status = "pass" if not mismatches else "fail"
+            except TestFailure as err:
+                actual = str(err)
+                evidence = {"exception_type": type(err).__name__}
+                status = "fail"
+            group.add(
+                CaseResult(
+                    id=f"esphome.g2.2.{case['id']}",
+                    title=case["id"],
+                    status=status,
+                    expected=case["expected_state"],
+                    actual=actual,
+                    evidence=evidence,
+                    duration_s=time.monotonic() - started,
+                )
+            )
+
+        for case in MQTT_INVALID_CASES:
+            started = time.monotonic()
+            self._ensure_reference_state()
+            unexpected_state = self._publish_invalid_set_and_capture_state(case["payload_text"])
+            invalid_status = "pass" if unexpected_state is None or not self._compare_expected(RETAINED_REFERENCE_STATE, unexpected_state) else "fail"
+            group.add(
+                CaseResult(
+                    id=f"esphome.g2.3.{case['id']}",
+                    title=case["id"],
+                    status=invalid_status,
+                    expected=case["expected"],
+                    actual=unexpected_state if unexpected_state is not None else "No state publish observed",
+                    duration_s=time.monotonic() - started,
+                )
+            )
+
+        group.add(
+            CaseResult(
+                id="esphome.g2.2.atomic_ir_transmit",
+                title="Atomic multi-field command transmit",
+                status="blocked" if self.mode == "full-hil" else "skip",
+                expected="Runner counts IR transmit bursts or DUT debug log lines for a multi-field set payload",
+                actual=(
+                    "full-hil mode requested but DUT log parsing for IR transmit counts is not implemented yet"
+                    if self.mode == "full-hil"
+                    else "Skipped outside full-hil mode until DUT log parsing is implemented"
+                ),
+            )
+        )
         return group
 
     def _run_esphome_group_3(self) -> GroupResult:
@@ -396,6 +459,74 @@ class Runner:
         if result.returncode != 0:
             raise TestFailure(f"Failed to publish MQTT message to {topic}: {result.stderr.strip()}")
 
+    def _read_retained_topic(self, suffix: str) -> Any:
+        cmd = self._mosquitto_sub_command(topic=f"{self.topic_prefix}/{suffix}", count=1, timeout=4)
+        result = self._run_command(cmd, check=False)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise TestFailure(f"Failed to read retained MQTT payload for {suffix}: {result.stderr.strip() or result.stdout.strip()}")
+        payload = result.stdout.strip()
+        if suffix == "availability":
+            return payload
+        return json.loads(payload)
+
+    def _publish_set_and_capture_state(self, payload: dict[str, Any]) -> dict[str, Any]:
+        sub_cmd = self._mosquitto_sub_command(
+            topic=f"{self.topic_prefix}/state",
+            count=1,
+            timeout=8,
+            suppress_retained=True,
+        )
+        proc = subprocess.Popen(sub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.2)
+        self._publish_text(f"{self.topic_prefix}/set", json.dumps(payload, separators=(",", ":")), retain=False)
+        stdout, stderr = proc.communicate(timeout=10)
+        if proc.returncode != 0 or not stdout.strip():
+            raise TestFailure(f"Failed to capture state publish for set payload {payload}: {stderr.strip() or stdout.strip()}")
+        return json.loads(stdout.strip())
+
+    def _ensure_reference_state(self) -> None:
+        reference = {
+            "mode": RETAINED_REFERENCE_STATE["mode"],
+            "target_temperature": RETAINED_REFERENCE_STATE["target_temperature"],
+            "fan_mode": RETAINED_REFERENCE_STATE["fan_mode"],
+            "swing_mode": RETAINED_REFERENCE_STATE["swing_mode"],
+            "swing_horizontal_mode": RETAINED_REFERENCE_STATE["swing_horizontal_mode"],
+        }
+        current_state = self._read_retained_topic("state")
+        if not self._compare_expected(reference, current_state):
+            return
+        actual_state = self._publish_set_and_capture_state(reference)
+        mismatches = self._compare_expected(reference, actual_state)
+        if mismatches:
+            raise TestFailure(f"Failed to restore reference state before MQTT set case: {mismatches}")
+
+    def _publish_invalid_set_and_capture_state(self, payload_text: str) -> dict[str, Any] | None:
+        sub_cmd = self._mosquitto_sub_command(
+            topic=f"{self.topic_prefix}/state",
+            count=1,
+            timeout=3,
+            suppress_retained=True,
+        )
+        proc = subprocess.Popen(sub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.2)
+        self._publish_text(f"{self.topic_prefix}/set", payload_text, retain=False)
+        stdout, _ = proc.communicate(timeout=5)
+        if proc.returncode == 0 and stdout.strip():
+            return json.loads(stdout.strip())
+        return None
+
+    def _payload_matches(self, expected: Any, actual: Any) -> bool:
+        if isinstance(expected, dict) and isinstance(actual, dict):
+            return not self._compare_expected(expected, actual)
+        return expected == actual
+
+    def _state_has_required_keys(self, payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("available") is not True:
+            return False
+        return all(key in payload for key in RETAINED_STATE_REQUIRED_KEYS)
+
     def _mosquitto_common(self) -> list[str]:
         return ["-h", self.mqtt_host, "-p", str(self.mqtt_port), "-u", self.mqtt_user, "-P", self.mqtt_pass]
 
@@ -405,8 +536,11 @@ class Runner:
             cmd.append("-r")
         return cmd
 
-    def _mosquitto_sub_command(self, *, topic: str, count: int, timeout: int) -> list[str]:
-        return ["mosquitto_sub", *self._mosquitto_common(), "-C", str(count), "-t", topic, "-W", str(timeout)]
+    def _mosquitto_sub_command(self, *, topic: str, count: int, timeout: int, suppress_retained: bool = False) -> list[str]:
+        cmd = ["mosquitto_sub", *self._mosquitto_common(), "-C", str(count), "-t", topic, "-W", str(timeout)]
+        if suppress_retained:
+            cmd.append("-R")
+        return cmd
 
     def _run_command(
         self,
@@ -424,6 +558,13 @@ class Runner:
     def _overall_status(self) -> bool:
         failing_statuses = {"fail", "blocked"} if self.mode == "full-hil" else {"fail"}
         return not any(case.status in failing_statuses for group in self.groups for case in group.cases)
+
+    def _compare_expected(self, expected: dict[str, Any], actual: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        return {
+            key: {"expected": value, "actual": actual.get(key)}
+            for key, value in expected.items()
+            if actual.get(key) != value
+        }
 
     def _summary_counts(self) -> dict[str, int]:
         counts = {"pass": 0, "fail": 0, "skip": 0, "blocked": 0}
