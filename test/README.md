@@ -22,8 +22,8 @@ The plan is split into two documents:
   groups, inputs, expected behaviour, and pass/fail criteria. Read this to
   understand scope and to decide what is in/out.
 - [`test-execution.md`](test-execution.md) — **how** to run it: prerequisites,
-  exact commands (incl. flashing the device), example test YAML, and how to
-  read results.
+  exact commands (incl. a from-scratch developer environment setup and
+  flashing the device), example test YAML, and how to read results.
 - [`run_full_test.py`](run_full_test.py) — entrypoint for the automation
   runner.
 - [`automation_runner/data.py`](automation_runner/data.py) — static suite and

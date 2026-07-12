@@ -43,6 +43,87 @@ python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pas
 python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
 ```
 
+## Environment setup from scratch
+
+These steps assume a new developer is starting with an empty `HA/` workspace
+and needs both the firmware and the HA-side integration test environment.
+
+1. Create the workspace layout and clone the required repos:
+
+   ```bash
+   mkdir -p HA/ha HA/esphome
+   cd HA/esphome
+   git clone <ESPHome upstream or local fork> esphome
+   git clone <PanaAC_v2_ESPHome remote> PanaAC_v2_ESPHome
+   cd ../ha
+   git clone https://github.com/home-assistant/core.git core
+   git clone <PanaAC_v2_HA remote> PanaAC_v2_HA
+   ```
+
+2. Create the ESPHome development environment:
+
+   ```bash
+   cd HA/esphome/esphome
+   python3 -m venv ../.venv
+   ../.venv/bin/pip install -e .
+   ```
+
+   The test commands in this repo expect the CLI at
+   `HA/esphome/.venv/bin/esphome`.
+
+3. Install local utilities used by the runner:
+
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y mosquitto mosquitto-clients
+   sudo systemctl enable --now mosquitto
+   ```
+
+4. Decide the MQTT host address the device can reach:
+
+   - From WSL or native Linux, the runner uses `127.0.0.1:1883`.
+   - The ESP device must use a reachable LAN IP for the host running
+     mosquitto. Replace the example host IP in the test YAMLs if your machine
+     is not using the same address as the original lab.
+
+5. Review the variant YAMLs under
+   `HA/esphome/PanaAC_v2_ESPHome/test/variants/` and set the local secrets they
+   need:
+
+   - Wi-Fi SSID/password
+   - MQTT username/password
+   - MQTT broker host reachable by the device
+
+6. Prepare the HA side for Group 2 and Group 3 cross-checks by following
+   `HA/ha/PanaAC_v2_HA/test/test-execution.md`. The same topic prefix and MQTT
+   credentials must be used on both sides.
+
+7. Connect the DUT hardware:
+
+   - ESP8266 d1_mini
+   - IR receiver on GPIO14 / D5
+   - IR LED on GPIO13 / D7
+   - Panasonic AC unit in line of sight for the IR transmitter
+
+8. Validate compile/config first, before flashing:
+
+   ```bash
+   cd HA/esphome/PanaAC_v2_ESPHome
+   python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+   ```
+
+9. Flash the DUT with the required test image:
+
+   - use `test/variants/C3.yaml` for the baseline runtime suites
+   - use `test/variants/C3-automation.yaml` for the automation suites
+
+   Example:
+
+   ```bash
+   cd HA/esphome
+   .venv/bin/esphome run PanaAC_v2_ESPHome/test/variants/C3-automation.yaml
+   ```
+
 ## Prerequisites
 
 - Workspace ESPHome venv with the esphome CLI built from the local platform
@@ -56,9 +137,10 @@ python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pas
   pointed at a Panasonic AC. USB-serial or OTA access for flashing.
 - Local mosquitto broker: `127.0.0.1:1883` from WSL, `mqtt_user`/`mqtt_pass`.
   Start it (sudo password `mnhmnh`): `echo 'mnhmnh' | sudo -S systemctl start
-  mosquitto`. The device reaches the broker at the host LAN IP `10.105.1.86`
-  (verify with `ip -4 -br addr show eth2`; a Windows Firewall rule for TCP
-  1883 must exist — see memory `local-mosquitto-broker`).
+  mosquitto`. The device reaches the broker at the host LAN IP of the machine
+  running mosquitto; verify that address locally and update the test YAML if
+  needed. If you are using WSL with a Windows-hosted network stack, ensure the
+  host firewall allows inbound TCP `1883`.
 - A Home Assistant dev instance with the `PanaAC_v2_HA` integration configured
   for the same topic prefix (for the Group 2 cross-check). See the HA repo's
   `test/test-execution.md` to bring it up.
