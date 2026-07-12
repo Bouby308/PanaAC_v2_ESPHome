@@ -1,9 +1,8 @@
 # PanaAC v2 ESPHome — test plan
 
-Full-test plan for the `panaac_v2` ESPHome custom component. This branch
-(`testing/full-test`) holds the plan only — the firmware source is unchanged
-from `main`. A later agent (human or AI) executes the plan against a real
-device and a Home Assistant instance.
+Full-test plan for the `panaac_v2` ESPHome custom component. These documents
+describe how to validate the firmware against a real device and a Home
+Assistant instance.
 
 Workspace layout is assumed to be relative to a portable `HA/` root:
 

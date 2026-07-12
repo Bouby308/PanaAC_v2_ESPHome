@@ -1,8 +1,8 @@
 # PanaAC v2 ESPHome — test specification
 
 Authoritative description of **what** the tests check. See
-`test-execution.md` for how to run them. Firmware reference: the `main` branch
-of this repo (the `testing/full-test` branch does not change firmware source).
+`test-execution.md` for how to run them. Firmware reference: the active repo
+branch under test.
 
 ## Conventions
 

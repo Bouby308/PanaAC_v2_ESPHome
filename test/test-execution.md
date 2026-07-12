@@ -4,8 +4,8 @@ How to run the tests in `test-specification.md`. The ESPHome side now has an
 automated runner for compile/config checks, MQTT runtime checks, and the
 automation-specific DUT interactions.
 
-Record each step's outcome on its `Result:` line and commit this file to the
-`testing/full-test` branch.
+Record each step's outcome on its `Result:` line and commit the updated result
+file to the repo branch you are using for the test run.
 
 ## Workspace layout
 
@@ -355,5 +355,5 @@ sensor you can set, or warm/cool the sensor. Result: …
   - output dir `report.md`
   - output dir `report.json`
   - any debug or capture logs under the output dir
-- Commit results to this file on the `testing/full-test` branch. Do not push
-  unless asked.
+- Commit results to this file on the repo branch you are using for the test
+  run. Do not push unless asked.
