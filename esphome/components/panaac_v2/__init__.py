@@ -28,7 +28,7 @@ from esphome.const import (
 from esphome.components.remote_base import CONF_RECEIVER_ID, CONF_TRANSMITTER_ID
 from esphome.types import ConfigType
 
-AUTO_LOAD = ["climate", "select"]
+AUTO_LOAD = ["climate", "select", "sensor"]
 DEPENDENCIES = ["remote_transmitter", "climate"]
 # `mqtt` is a soft dependency: the v2 MQTT features (topic_prefix) require a `mqtt:` block, which
 # defines USE_MQTT and compiles in the CustomMQTTDevice code path. Without a `mqtt:` block

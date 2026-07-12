@@ -220,10 +220,30 @@ climate automation features work:
   id(panaac_v2_climate).mode
   id(panaac_v2_climate).target_temperature
   id(panaac_v2_climate).current_temperature
+  id(panaac_v2_climate).action
   id(panaac_v2_climate).get_custom_fan_mode()
   id(panaac_v2_climate).get_custom_swing_mode()
   id(panaac_v2_climate).get_swing_horizontal_mode()
   ```
+
+  `action` (`ClimateAction`) is *derived* from the commanded mode by
+  `update_action_()` — the controller is a one-way IR transmitter and cannot
+  read back whether the compressor is actually running, so it assumes the
+  commanded mode is the unit's real state:
+
+  | Commanded mode | `action` |
+  |----------------|----------|
+  | `OFF`          | `OFF`    |
+  | `COOL`         | `COOLING`|
+  | `HEAT`         | `HEATING`|
+  | `DRY`          | `DRYING` |
+  | `FAN_ONLY`     | `FAN`    |
+  | `AUTO`         | `COOLING` if room > setpoint, `HEATING` if room < setpoint, else `IDLE` |
+
+  `update_action_()` runs at the end of `sync_to_climate_()` (so every state
+  publish carries a fresh action) and on the current-temperature sensor callback
+  (so the `AUTO` inference tracks the room temperature). The native-API climate
+  entity therefore reports the same action the lambda sees.
 
 - **`on_state` trigger** fires every time the climate state is published (for
   example after a command, an IR decode, or a sensor update).

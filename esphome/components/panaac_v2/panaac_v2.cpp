@@ -127,6 +127,8 @@ void PanaACV2Climate::setup() {
     this->sensor_->add_on_state_callback([this](float state) {
       if (!std::isnan(state)) {
         this->current_temperature = state;
+        // Room temperature drives the AUTO action inference, so recompute before publishing.
+        this->update_action_();
         this->publish_state_by_mode_();
       }
     });
@@ -292,6 +294,49 @@ void PanaACV2Climate::sync_to_climate_() {
     this->swing_mode = ac_state.swing_mode;
   } else {
     this->swing_mode = ac_state.swing_mode;
+  }
+
+  this->update_action_();
+}
+
+void PanaACV2Climate::update_action_() {
+  // The controller is a one-way IR transmitter: it cannot read back whether the unit's compressor
+  // is actually running, so assume the commanded mode is the unit's real state and mirror it into
+  // `action` (the ClimateAction the lambda `id(x).action` and the native API expose). AUTO has no
+  // fixed action, so infer it from the room vs. setpoint temperature — the same comparison the AC's
+  // own thermostat makes — and fall back to IDLE when the room is at setpoint or the temperature is
+  // unknown.
+  switch (this->ac_state.mode) {
+    case climate::CLIMATE_MODE_OFF:
+      this->action = climate::CLIMATE_ACTION_OFF;
+      break;
+    case climate::CLIMATE_MODE_COOL:
+      this->action = climate::CLIMATE_ACTION_COOLING;
+      break;
+    case climate::CLIMATE_MODE_HEAT:
+      this->action = climate::CLIMATE_ACTION_HEATING;
+      break;
+    case climate::CLIMATE_MODE_DRY:
+      this->action = climate::CLIMATE_ACTION_DRYING;
+      break;
+    case climate::CLIMATE_MODE_FAN_ONLY:
+      this->action = climate::CLIMATE_ACTION_FAN;
+      break;
+    case climate::CLIMATE_MODE_AUTO:
+      if (!std::isnan(this->current_temperature) && this->target_temperature != 0.0f) {
+        if (this->current_temperature > this->target_temperature)
+          this->action = climate::CLIMATE_ACTION_COOLING;
+        else if (this->current_temperature < this->target_temperature)
+          this->action = climate::CLIMATE_ACTION_HEATING;
+        else
+          this->action = climate::CLIMATE_ACTION_IDLE;
+      } else {
+        this->action = climate::CLIMATE_ACTION_IDLE;
+      }
+      break;
+    default:
+      this->action = climate::CLIMATE_ACTION_IDLE;
+      break;
   }
 }
 
