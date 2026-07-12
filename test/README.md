@@ -13,6 +13,14 @@ The plan is split into two documents:
 - [`test-execution.md`](test-execution.md) — **how** to run it: prerequisites,
   exact commands (incl. flashing the device), example test YAML, and how to
   read results.
+- [`run_full_test.py`](run_full_test.py) — entrypoint for the automation
+  runner.
+- [`automation_runner/data.py`](automation_runner/data.py) — static suite and
+  variant expectations.
+- [`automation_runner/core.py`](automation_runner/core.py) — test framework,
+  environment validation, report generation, and suite execution.
+- [`automation_runner/cli.py`](automation_runner/cli.py) — CLI and interactive
+  menu for selecting suites and preparing the environment.
 
 ## Scope (three groups)
 
@@ -36,3 +44,10 @@ The plan is split into two documents:
 
 Not yet executed. After execution, record results inline in
 `test-execution.md` (each step has a "Result:" line) and commit to this branch.
+
+## Runner usage
+
+- `python3 test/run_full_test.py list`
+- `python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass`
+- `python3 test/run_full_test.py menu`
