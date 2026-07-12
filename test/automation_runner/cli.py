@@ -13,13 +13,13 @@ from .data import DEFAULT_MQTT_HOST, DEFAULT_MQTT_PORT, DEFAULT_TOPIC_PREFIX, SU
 
 def build_parser() -> argparse.ArgumentParser:
     repo_root = Path(__file__).resolve().parents[2]
-    workspace_root = repo_root.parent
+    workspace_root = repo_root.parents[1]
     parser = argparse.ArgumentParser(description="PanaAC v2 ESPHome automated test runner")
     subparsers = parser.add_subparsers(dest="command")
 
     def add_common_arguments(target: argparse.ArgumentParser, *, require_mqtt: bool) -> None:
-        target.add_argument("--esphome-workspace-path", default=str(workspace_root))
-        target.add_argument("--ha-repo-path", default=str(workspace_root.parent / "ha" / "PanaAC_v2_HA"))
+        target.add_argument("--esphome-workspace-path", default=str(workspace_root / "esphome"))
+        target.add_argument("--ha-repo-path", default=str(workspace_root / "ha" / "PanaAC_v2_HA"))
         target.add_argument("--topic-prefix", default=DEFAULT_TOPIC_PREFIX)
         target.add_argument("--mqtt-host", default=DEFAULT_MQTT_HOST)
         target.add_argument("--mqtt-port", type=int, default=DEFAULT_MQTT_PORT)

@@ -5,6 +5,17 @@ Full-test plan for the `panaac_v2` ESPHome custom component. This branch
 from `main`. A later agent (human or AI) executes the plan against a real
 device and a Home Assistant instance.
 
+Workspace layout is assumed to be relative to a portable `HA/` root:
+
+```text
+HA/
+  ha/
+    core/
+    PanaAC_v2_HA/
+  esphome/
+    PanaAC_v2_ESPHome/
+```
+
 The plan is split into two documents:
 
 - [`test-specification.md`](test-specification.md) — **what** to test: the test

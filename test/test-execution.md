@@ -7,6 +7,23 @@ automation-specific DUT interactions.
 Record each step's outcome on its `Result:` line and commit this file to the
 `testing/full-test` branch.
 
+## Workspace layout
+
+These instructions assume the portable workspace root is `HA/` and the repos
+sit under:
+
+```text
+HA/
+  ha/
+    core/
+    PanaAC_v2_HA/
+  esphome/
+    PanaAC_v2_ESPHome/
+```
+
+Use paths relative to the workspace root so the whole `HA/` tree can be moved
+without rewriting the docs or scripts.
+
 ## Recommended order
 
 1. Validate the environment.
@@ -47,7 +64,7 @@ python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pas
   `test/test-execution.md` to bring it up.
 
 All `esphome` commands run from the workspace `esphome/` dir:
-`cd /home/hoangminh/AgentsWork/Codex/HA/esphome`.
+`cd esphome`.
 
 ## Automated runner entrypoints
 
@@ -60,6 +77,13 @@ python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_p
 python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
 python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
 python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
+From the workspace root `HA/`, the same commands are:
+
+```bash
+cd esphome/PanaAC_v2_ESPHome
+python3 test/run_full_test.py list
 ```
 
 Suite meaning:
