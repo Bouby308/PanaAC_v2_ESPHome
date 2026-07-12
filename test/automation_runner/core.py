@@ -301,13 +301,20 @@ class Runner:
             CaseResult(
                 id="esphome.g2.2.atomic_ir_transmit",
                 title="Atomic multi-field command transmit",
-                status="blocked" if self.mode == "full-hil" else "skip",
-                expected="Runner counts IR transmit bursts or DUT debug log lines for a multi-field set payload",
-                actual=(
-                    "full-hil mode requested but DUT log parsing for IR transmit counts is not implemented yet"
-                    if self.mode == "full-hil"
-                    else "Skipped outside full-hil mode until DUT log parsing is implemented"
-                ),
+                status="pass"
+                if (
+                    lambda result: self._count_log_fragment(result["logs"], "Sending remote code") == 1
+                    and not self._compare_expected({"mode": "cool", "target_temperature": 23}, result["state"])
+                )(atomic_result := self._publish_set_and_capture_state_and_debug({"mode": "cool", "target_temperature": 23}))
+                else "fail",
+                expected={
+                    "state": {"mode": "cool", "target_temperature": 23},
+                    "debug_log_count": {"Sending remote code": 1},
+                },
+                actual=atomic_result,
+                evidence={
+                    "sending_remote_code_count": self._count_log_fragment(atomic_result["logs"], "Sending remote code"),
+                },
             )
         )
         return group
@@ -574,6 +581,29 @@ class Runner:
             raise TestFailure(f"Failed to capture state publish for set payload {payload}: {stderr.strip() or stdout.strip()}")
         return json.loads(stdout.strip())
 
+    def _publish_set_and_capture_state_and_debug(self, payload: dict[str, Any]) -> dict[str, Any]:
+        debug_cmd = self._mosquitto_sub_command(topic="esphome-panaac-v2/debug", count=6, timeout=6)
+        debug_proc = subprocess.Popen(debug_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        state_cmd = self._mosquitto_sub_command(
+            topic=f"{self.topic_prefix}/state",
+            count=1,
+            timeout=8,
+            suppress_retained=True,
+        )
+        state_proc = subprocess.Popen(state_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.2)
+        self._publish_text(f"{self.topic_prefix}/set", json.dumps(payload, separators=(",", ":")), retain=False)
+        state_stdout, state_stderr = state_proc.communicate(timeout=10)
+        debug_stdout, debug_stderr = debug_proc.communicate(timeout=8)
+        if state_proc.returncode != 0 or not state_stdout.strip():
+            raise TestFailure(f"Failed to capture state publish for atomic set payload {payload}: {state_stderr.strip() or state_stdout.strip()}")
+        if debug_proc.returncode != 0 and not debug_stdout.strip():
+            raise TestFailure(f"Failed to capture DUT debug logs for atomic set payload {payload}: {debug_stderr.strip() or debug_stdout.strip()}")
+        return {
+            "state": json.loads(state_stdout.strip()),
+            "logs": [line.strip() for line in debug_stdout.splitlines() if line.strip()],
+        }
+
     def _ensure_reference_state(self) -> None:
         reference = {
             "mode": RETAINED_REFERENCE_STATE["mode"],
@@ -585,10 +615,21 @@ class Runner:
         current_state = self._read_retained_topic("state")
         if not self._compare_expected(reference, current_state):
             return
-        actual_state = self._publish_set_and_capture_state(reference)
+        self._publish_text(f"{self.topic_prefix}/set", json.dumps(reference, separators=(",", ":")), retain=False)
+        actual_state = self._wait_for_retained_state_subset(reference)
         mismatches = self._compare_expected(reference, actual_state)
         if mismatches:
             raise TestFailure(f"Failed to restore reference state before MQTT set case: {mismatches}")
+
+    def _wait_for_retained_state_subset(self, expected: dict[str, Any], timeout: float = 8.0, interval: float = 0.4) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        latest: dict[str, Any] = {}
+        while time.monotonic() < deadline:
+            latest = self._read_retained_topic("state")
+            if not self._compare_expected(expected, latest):
+                return latest
+            time.sleep(interval)
+        return latest
 
     def _publish_invalid_set_and_capture_state(self, payload_text: str) -> dict[str, Any] | None:
         sub_cmd = self._mosquitto_sub_command(
@@ -644,6 +685,9 @@ class Runner:
 
     def _missing_log_fragments(self, lines: list[str], fragments: tuple[str, ...]) -> list[str]:
         return [fragment for fragment in fragments if not any(fragment in line for line in lines)]
+
+    def _count_log_fragment(self, lines: list[str], fragment: str) -> int:
+        return sum(1 for line in lines if fragment in line)
 
     def _mosquitto_common(self) -> list[str]:
         return ["-h", self.mqtt_host, "-p", str(self.mqtt_port), "-u", self.mqtt_user, "-P", self.mqtt_pass]
