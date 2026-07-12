@@ -1,7 +1,30 @@
 # PanaAC v2 ESPHome — test execution instructions
 
-How to run the tests in `test-specification.md`. Record each step's outcome on
-its `Result:` line and commit this file to the `testing/full-test` branch.
+How to run the tests in `test-specification.md`. The ESPHome side now has an
+automated runner for compile/config checks, MQTT runtime checks, and the
+automation-specific DUT interactions.
+
+Record each step's outcome on its `Result:` line and commit this file to the
+`testing/full-test` branch.
+
+## Recommended order
+
+1. Validate the environment.
+2. Run `esphome.g1` for config/compile coverage.
+3. Flash the DUT with `C3-automation.yaml`.
+4. Run the runtime suites that need the DUT online.
+5. Record the result in a timestamped `test-execution-<date-time>.md`.
+
+## Fast path
+
+From `esphome/PanaAC_v2_ESPHome`:
+
+```bash
+python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
 
 ## Prerequisites
 
@@ -26,6 +49,33 @@ its `Result:` line and commit this file to the `testing/full-test` branch.
 All `esphome` commands run from the workspace `esphome/` dir:
 `cd /home/hoangminh/AgentsWork/Codex/HA/esphome`.
 
+## Automated runner entrypoints
+
+From `esphome/PanaAC_v2_ESPHome`:
+
+```bash
+python3 test/run_full_test.py list
+python3 test/run_full_test.py menu
+python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
+
+Suite meaning:
+
+- `esphome.g1` covers variant YAML config + compile
+- `ha.g2` covers retained MQTT topics, command round-trip, malformed payloads,
+  and atomic multi-field command behavior against the DUT
+- `ha.g3` covers `climate.control`, lambda `make_call`, `on_state`,
+  `on_control`, and debug-log-assisted DUT observations
+
+## Current automation status
+
+- `esphome.g1`: automated and stable
+- `ha.g2`: automated and intended to run with the DUT flashed and connected
+- `ha.g3`: automated and intended to run with `C3-automation.yaml`
+
 ## Variant YAMLs (Group 1)
 
 The variant YAMLs already exist at `test/variants/C1.yaml` …
@@ -37,6 +87,12 @@ For a config-only (no hardware) check you may drop `mqtt`/`wifi` pins, but keep
 `remote_receiver`/`remote_transmitter` pin blocks so the component loads.
 
 ## Group 1 — Configuration combinations
+
+Automated path:
+
+```bash
+python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
 
 For each variant `V` in C1..C6:
 
@@ -70,7 +126,19 @@ is already on the network, else USB-serial via `--device /dev/ttyUSB0` — see
 memory `wsl-windows-esptool-flash` for the WSL USB-serial path). Watch the
 serial/log until `WiFi connected` and `MQTT connected`.
 
+For the automation suites, flash the dedicated automation build:
+
+```bash
+.venv/bin/esphome run PanaAC_v2_ESPHome/test/variants/C3-automation.yaml
+```
+
 ## Group 2 — Two-way MQTT with HA
+
+Automated path:
+
+```bash
+python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
 
 Subscribe to all DUT topics in one terminal (leave it running):
 
@@ -106,6 +174,12 @@ Publish `{"preset":"ECO"}`, `{"target_humidity":50}`, `{not json`, and
 transmit and no state change (check the subscribe terminal + DUT log). Result: …
 
 ## Group 3 — ESPHome climate automation
+
+Automated path:
+
+```bash
+python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+```
 
 Add the following to a test build of the C3 config (e.g. an extra
 `test/variants/C3-automation.yaml`) and flash it, so the on-device triggers
@@ -171,5 +245,9 @@ sensor you can set, or warm/cool the sensor. Result: …
 
 - If any step fails, capture the DUT log (`logger` DEBUG) and the broker
   subscribe output, and record the actual vs expected under that step.
+- Recommended artifacts to keep for each automated run:
+  - output dir `report.md`
+  - output dir `report.json`
+  - any debug or capture logs under the output dir
 - Commit results to this file on the `testing/full-test` branch. Do not push
   unless asked.
