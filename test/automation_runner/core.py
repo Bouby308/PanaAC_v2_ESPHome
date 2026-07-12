@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable
 
 from .data import (
+    BUTTON_TOPICS,
     DEFAULT_TOPIC_PREFIX,
     MQTT_INVALID_CASES,
     MQTT_SET_CASES,
@@ -313,29 +314,118 @@ class Runner:
 
     def _run_esphome_group_3(self) -> GroupResult:
         group = GroupResult("esphome.g3", SUITE_LABELS["esphome.g3"])
-        status = "blocked" if self.mode == "full-hil" else "skip"
-        actual = (
-            "full-hil mode requested but DUT flash/log automation is not implemented yet"
-            if self.mode == "full-hil"
-            else "Skipped outside full-hil mode until DUT flash/log automation is implemented"
+        started = time.monotonic()
+        control_debug, control_state = self._press_button_and_capture(
+            BUTTON_TOPICS["control_cool_24c"],
+            capture_state=True,
         )
-        for suffix, title in (
-            ("3.1", "ESPHome climate.control action"),
-            ("3.2", "ESPHome on_state trigger"),
-            ("3.3", "ESPHome on_control trigger"),
-            ("3.4", "ESPHome lambda state accessors"),
-            ("3.5", "ESPHome derived action"),
-            ("3.6", "ESPHome make_call lambda"),
-        ):
-            group.add(
-                CaseResult(
-                    id=f"esphome.g{suffix}",
-                    title=title,
-                    status=status,
-                    expected="Runner flashes automation build and parses DUT logs",
-                    actual=actual,
-                )
+        control_expected_state = {
+            "mode": "cool",
+            "target_temperature": 24,
+            "fan_mode": "Auto",
+            "swing_mode": "Auto",
+        }
+        control_state_mismatches = self._compare_expected(control_expected_state, control_state or {})
+        control_expected_logs = ("on_control fired", "on_state fired", "Sending remote code")
+        control_log_mismatches = self._missing_log_fragments(control_debug, control_expected_logs)
+        group.add(
+            CaseResult(
+                id="esphome.g3.1",
+                title="ESPHome climate.control action",
+                status="pass" if not control_state_mismatches and not control_log_mismatches else "fail",
+                expected={"state": control_expected_state, "logs": list(control_expected_logs)},
+                actual={"state": control_state, "logs": control_debug},
+                evidence={
+                    key: value
+                    for key, value in {
+                        "state_mismatches": control_state_mismatches,
+                        "log_mismatches": control_log_mismatches,
+                    }.items()
+                    if value
+                },
+                duration_s=time.monotonic() - started,
             )
+        )
+
+        started = time.monotonic()
+        lambda_log_debug, _ = self._press_button_and_capture(
+            BUTTON_TOPICS["lambda_action_log"],
+            capture_state=False,
+        )
+        lambda_expected_logs = ("on_state fired", "mode=", "action=", "cur=", "tgt=")
+        lambda_log_mismatches = self._missing_log_fragments(lambda_log_debug, lambda_expected_logs)
+        group.add(
+            CaseResult(
+                id="esphome.g3.4",
+                title="ESPHome lambda state accessors",
+                status="pass" if not lambda_log_mismatches else "fail",
+                expected={"logs": list(lambda_expected_logs)},
+                actual={"logs": lambda_log_debug},
+                evidence={"log_mismatches": lambda_log_mismatches} if lambda_log_mismatches else {},
+                duration_s=time.monotonic() - started,
+            )
+        )
+        derived_action_ok = any("action=2" in line for line in lambda_log_debug)
+        group.add(
+            CaseResult(
+                id="esphome.g3.5",
+                title="ESPHome derived action",
+                status="pass" if derived_action_ok else "fail",
+                expected="Lambda action log reports action=2 for cooling mode",
+                actual=lambda_log_debug,
+            )
+        )
+
+        started = time.monotonic()
+        make_call_debug, make_call_state = self._press_button_and_capture(
+            BUTTON_TOPICS["lambda_make_call_cool_24c"],
+            capture_state=True,
+        )
+        make_call_expected_state = {
+            "mode": "cool",
+            "target_temperature": 24,
+            "fan_mode": "Level 2",
+        }
+        make_call_state_mismatches = self._compare_expected(make_call_expected_state, make_call_state or {})
+        make_call_expected_logs = ("on_control fired", "on_state fired", "Sending remote code")
+        make_call_log_mismatches = self._missing_log_fragments(make_call_debug, make_call_expected_logs)
+        group.add(
+            CaseResult(
+                id="esphome.g3.6",
+                title="ESPHome make_call lambda",
+                status="pass" if not make_call_state_mismatches and not make_call_log_mismatches else "fail",
+                expected={"state": make_call_expected_state, "logs": list(make_call_expected_logs)},
+                actual={"state": make_call_state, "logs": make_call_debug},
+                evidence={
+                    key: value
+                    for key, value in {
+                        "state_mismatches": make_call_state_mismatches,
+                        "log_mismatches": make_call_log_mismatches,
+                    }.items()
+                    if value
+                },
+                duration_s=time.monotonic() - started,
+            )
+        )
+
+        group.add(
+            CaseResult(
+                id="esphome.g3.2",
+                title="ESPHome on_state trigger",
+                status="pass" if any("on_state fired" in line for line in control_debug + lambda_log_debug + make_call_debug) else "fail",
+                expected="DUT logs show on_state fired during control and lambda helper actions",
+                actual=control_debug + lambda_log_debug + make_call_debug,
+            )
+        )
+        group.add(
+            CaseResult(
+                id="esphome.g3.3",
+                title="ESPHome on_control trigger",
+                status="pass" if any("on_control fired" in line for line in control_debug + make_call_debug) else "fail",
+                expected="DUT logs show on_control fired during control and make_call helper actions",
+                actual=control_debug + make_call_debug,
+            )
+        )
         return group
 
     def _validate_environment(self) -> None:
@@ -515,6 +605,31 @@ class Runner:
             return json.loads(stdout.strip())
         return None
 
+    def _press_button_and_capture(self, topic: str, *, capture_state: bool) -> tuple[list[str], dict[str, Any] | None]:
+        debug_cmd = self._mosquitto_sub_command(topic="esphome-panaac-v2/debug", count=6, timeout=5)
+        debug_proc = subprocess.Popen(debug_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        state_proc: subprocess.Popen[str] | None = None
+        if capture_state:
+            state_cmd = self._mosquitto_sub_command(
+                topic=f"{self.topic_prefix}/state",
+                count=1,
+                timeout=5,
+                suppress_retained=True,
+            )
+            state_proc = subprocess.Popen(state_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        time.sleep(0.2)
+        self._publish_text(topic, "PRESS", retain=False)
+        state_payload: dict[str, Any] | None = None
+        if state_proc is not None:
+            state_stdout, state_stderr = state_proc.communicate(timeout=7)
+            if state_proc.returncode == 0 and state_stdout.strip():
+                state_payload = json.loads(state_stdout.strip())
+            else:
+                raise TestFailure(f"Failed to capture state publish after pressing {topic}: {state_stderr.strip() or state_stdout.strip()}")
+        debug_stdout, _ = debug_proc.communicate(timeout=7)
+        debug_lines = [line.strip() for line in debug_stdout.splitlines() if line.strip()]
+        return debug_lines, state_payload
+
     def _payload_matches(self, expected: Any, actual: Any) -> bool:
         if isinstance(expected, dict) and isinstance(actual, dict):
             return not self._compare_expected(expected, actual)
@@ -526,6 +641,9 @@ class Runner:
         if payload.get("available") is not True:
             return False
         return all(key in payload for key in RETAINED_STATE_REQUIRED_KEYS)
+
+    def _missing_log_fragments(self, lines: list[str], fragments: tuple[str, ...]) -> list[str]:
+        return [fragment for fragment in fragments if not any(fragment in line for line in lines)]
 
     def _mosquitto_common(self) -> list[str]:
         return ["-h", self.mqtt_host, "-p", str(self.mqtt_port), "-u", self.mqtt_user, "-P", self.mqtt_pass]

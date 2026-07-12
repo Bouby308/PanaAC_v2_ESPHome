@@ -186,3 +186,9 @@ MQTT_INVALID_CASES = [
         "expected": "No new state publish after malformed JSON payload",
     },
 ]
+
+BUTTON_TOPICS = {
+    "control_cool_24c": "esphome-panaac-v2/button/control_cool_24c/command",
+    "lambda_action_log": "esphome-panaac-v2/button/lambda_action_log/command",
+    "lambda_make_call_cool_24c": "esphome-panaac-v2/button/lambda_make_call_cool_24c/command",
+}
