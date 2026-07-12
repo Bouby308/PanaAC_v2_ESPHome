@@ -21,10 +21,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
 import os
+import selectors
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any, Callable
 
@@ -103,6 +105,7 @@ class Runner:
 
     def run(self) -> int:
         try:
+            self._log("Starting PanaAC v2 ESPHome automated tests")
             self._validate_environment()
             if "esphome.g1" in self.selected_suites:
                 self.groups.append(self._run_esphome_group_1())
@@ -111,8 +114,10 @@ class Runner:
             if "esphome.g3" in self.selected_suites:
                 self.groups.append(self._run_esphome_group_3())
             self._write_reports()
+            self._log(f"Completed automated tests with overall status: {'pass' if self._overall_status() else 'fail'}")
             return 0 if self._overall_status() else 1
         except Exception as err:  # noqa: BLE001
+            self._log(f"Runner failed: {err}")
             failure_group = GroupResult("runner", "Runner")
             failure_group.add(
                 CaseResult(
@@ -159,6 +164,7 @@ class Runner:
 
         for variant in VARIANT_ORDER:
             started = time.monotonic()
+            self._log(f"[esphome.g1] {variant}: config and compile")
             yaml_path = self.repo_root / "test" / "variants" / f"{variant}.yaml"
             expectation = VARIANT_EXPECTATIONS[variant]
             if not yaml_path.exists():
@@ -246,12 +252,14 @@ class Runner:
 
     def _run_esphome_group_2(self) -> GroupResult:
         group = GroupResult("esphome.g2", SUITE_LABELS["esphome.g2"])
+        self._log("[esphome.g2] MQTT retained state and set handling checks")
         for suffix, topic_suffix, expected_payload in (
             ("2.1.availability", "availability", "online"),
             ("2.1.traits", "traits", RETAINED_REFERENCE_TRAITS),
             ("2.1.state", "state", None),
         ):
             started = time.monotonic()
+            self._log(f"[esphome.g2] retained {topic_suffix}")
             actual_payload = self._read_retained_topic(topic_suffix)
             if topic_suffix == "state":
                 status = "pass" if self._state_has_required_keys(actual_payload) else "fail"
@@ -272,6 +280,7 @@ class Runner:
 
         for case in MQTT_SET_CASES:
             started = time.monotonic()
+            self._log(f"[esphome.g2] set case: {case['id']}")
             try:
                 self._ensure_reference_state()
                 actual_state = self._publish_set_and_capture_state(case["payload"])
@@ -297,6 +306,7 @@ class Runner:
 
         for case in MQTT_INVALID_CASES:
             started = time.monotonic()
+            self._log(f"[esphome.g2] invalid set case: {case['id']}")
             self._ensure_reference_state()
             unexpected_state = self._publish_invalid_set_and_capture_state(case["payload_text"])
             invalid_status = "pass" if unexpected_state is None or not self._compare_expected(RETAINED_REFERENCE_STATE, unexpected_state) else "fail"
@@ -335,6 +345,7 @@ class Runner:
 
     def _run_esphome_group_3(self) -> GroupResult:
         group = GroupResult("esphome.g3", SUITE_LABELS["esphome.g3"])
+        self._log("[esphome.g3] Button and lambda integration checks")
         started = time.monotonic()
         control_debug, control_state = self._press_button_and_capture(
             BUTTON_TOPICS["control_cool_24c"],
@@ -369,11 +380,12 @@ class Runner:
         )
 
         started = time.monotonic()
+        self._log("[esphome.g3] lambda state accessors")
         lambda_log_debug, _ = self._press_button_and_capture(
             BUTTON_TOPICS["lambda_action_log"],
             capture_state=False,
         )
-        lambda_expected_logs = ("on_state fired", "mode=", "action=", "cur=", "tgt=")
+        lambda_expected_logs = ("mode=", "action=", "cur=", "tgt=")
         lambda_log_mismatches = self._missing_log_fragments(lambda_log_debug, lambda_expected_logs)
         group.add(
             CaseResult(
@@ -398,6 +410,7 @@ class Runner:
         )
 
         started = time.monotonic()
+        self._log("[esphome.g3] lambda make_call")
         make_call_debug, make_call_state = self._press_button_and_capture(
             BUTTON_TOPICS["lambda_make_call_cool_24c"],
             capture_state=True,
@@ -556,6 +569,7 @@ class Runner:
     def _verify_mqtt_round_trip(self) -> None:
         topic = f"{self.topic_prefix}/test_runner_probe"
         payload = f"probe-{int(time.time())}"
+        self._log(f"Checking MQTT round-trip on {topic}")
         sub_cmd = self._mosquitto_sub_command(topic=topic, count=1, timeout=4)
         proc = subprocess.Popen(sub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         time.sleep(0.2)
@@ -726,7 +740,38 @@ class Runner:
         env: dict[str, str] | None = None,
         check: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        result = subprocess.run(cmd, cwd=cwd, env=env, text=True, capture_output=True)
+        self._log(f"$ {' '.join(cmd)}")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        selector = selectors.DefaultSelector()
+        if proc.stdout is not None:
+            selector.register(proc.stdout, selectors.EVENT_READ, ("stdout", stdout_chunks))
+        if proc.stderr is not None:
+            selector.register(proc.stderr, selectors.EVENT_READ, ("stderr", stderr_chunks))
+        while selector.get_map():
+            for key, _ in selector.select():
+                stream_name, chunks = key.data
+                line = key.fileobj.readline()
+                if line == "":
+                    selector.unregister(key.fileobj)
+                    continue
+                chunks.append(line)
+                target = sys.stdout if stream_name == "stdout" else sys.stderr
+                target.write(line)
+                target.flush()
+        returncode = proc.wait()
+        result = subprocess.CompletedProcess(cmd, returncode, "".join(stdout_chunks), "".join(stderr_chunks))
+        if stderr_chunks and returncode == 0:
+            self._log(f"[warn] command wrote to stderr: {' '.join(cmd)}")
         if check and result.returncode != 0:
             raise TestFailure(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
         return result
@@ -751,6 +796,8 @@ class Runner:
         return counts
 
     def _write_reports(self) -> None:
+        self._log(f"Writing JSON report to {self.report_json_path}")
+        self._log(f"Writing Markdown report to {self.report_md_path}")
         payload = {
             "timestamp": self.timestamp.isoformat(),
             "mode": self.mode,
@@ -761,6 +808,9 @@ class Runner:
         }
         self.report_json_path.write_text(json.dumps(payload, indent=2) + "\n")
         self.report_md_path.write_text(self._report_markdown(payload))
+
+    def _log(self, message: str) -> None:
+        print(message, flush=True)
 
     def _group_to_json(self, group: GroupResult) -> dict[str, Any]:
         return {

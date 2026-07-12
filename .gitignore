@@ -2,3 +2,4 @@
 secrets.yaml
 *.pyc
 __pycache__/
+test/results/
