@@ -7,8 +7,10 @@ branch under test.
 ## Conventions
 
 - "DUT" = device under test (the ESP8266 running the `panaac_v2` firmware).
-- "Broker" = the local mosquitto broker (`127.0.0.1:1883` from HA/WSL,
-  `10.105.1.86:1883` from the device; `mqtt_user` / `mqtt_pass`).
+- "Broker" = the MQTT broker under test. For isolated setup checks the runner can
+  spawn a fresh local broker on `127.0.0.1`; for DUT-backed suites it flashes the
+  device with the current workstation LAN IP automatically and uses the configured
+  MQTT credentials.
 - Topic prefix `<p>` = `panaac_v2/esphome-panaac-v2` (override per config).
 - "v2 mode" = MQTT mode, enabled by setting `topic_prefix`. "v1 mode" = native
   API mode (no `topic_prefix`).

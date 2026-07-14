@@ -22,6 +22,7 @@ from datetime import datetime
 import json
 import os
 import selectors
+import socket
 from pathlib import Path
 import re
 import shutil
@@ -32,6 +33,7 @@ from typing import Any, Callable
 
 from .data import (
     BUTTON_TOPICS,
+    DEFAULT_MQTT_PORT,
     DEFAULT_TOPIC_PREFIX,
     MQTT_INVALID_CASES,
     MQTT_SET_CASES,
@@ -91,24 +93,46 @@ class Runner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.raw_capture_dir = self.output_dir / "captures"
         self.raw_capture_dir.mkdir(parents=True, exist_ok=True)
+        self.mqtt_log_path = self.output_dir / "mqtt-broker.log"
+        self.mqtt_config_path = self.output_dir / "mosquitto.conf"
         self.topic_prefix = args.topic_prefix
+        self.esphome_device = getattr(args, "esphome_device", None)
+        self.esphome_run_extra_args = list(getattr(args, "esphome_run_extra_args", []))
+        self.flush_mqtt_before_runtime = not getattr(args, "no_flush_mqtt", False)
+        self.flash_dut_before_runtime = not getattr(args, "no_flash_dut", False)
+        self.mqtt_broker_mode = getattr(args, "mqtt_broker_mode", "external")
         self.mqtt_host = args.mqtt_host
         self.mqtt_port = args.mqtt_port
         self.mqtt_user = args.mqtt_user
         self.mqtt_pass = args.mqtt_pass
+        self.wifi_ssid = getattr(args, "wifi_ssid", None)
+        self.wifi_password = getattr(args, "wifi_password", None)
+        self.wifi_ap_password = getattr(args, "wifi_ap_password", None)
+        if self.mqtt_broker_mode == "spawn":
+            self.mqtt_host = "127.0.0.1"
+            if self.mqtt_port == DEFAULT_MQTT_PORT:
+                self.mqtt_port = self._allocate_free_tcp_port()
+            self.mqtt_user = None
+            self.mqtt_pass = None
+        self.runtime_broker_host = self._detect_runtime_broker_host()
         self.mode = args.mode
         self.selected_suites = set(args.suites or SUITE_CHOICES)
         self.timestamp = datetime.now().astimezone()
         self.report_json_path = self.output_dir / "report.json"
         self.report_md_path = self.output_dir / "report.md"
         self.groups: list[GroupResult] = []
+        self._mqtt_broker_proc: subprocess.Popen[bytes] | None = None
 
     def run(self) -> int:
         try:
             self._log("Starting PanaAC v2 ESPHome automated tests")
+            if self.mqtt_broker_mode == "spawn":
+                self._ensure_mqtt_broker_ready()
             self._validate_environment()
             if "esphome.g1" in self.selected_suites:
                 self.groups.append(self._run_esphome_group_1())
+            if self.selected_suites & {"esphome.g2", "esphome.g3"}:
+                self._prepare_runtime_suites()
             if "esphome.g2" in self.selected_suites:
                 self.groups.append(self._run_esphome_group_2())
             if "esphome.g3" in self.selected_suites:
@@ -132,6 +156,8 @@ class Runner:
             self.groups.append(failure_group)
             self._write_reports()
             return 1
+        finally:
+            self._cleanup()
 
     def setup_environment(
         self,
@@ -141,6 +167,9 @@ class Runner:
         verify_variants: bool,
     ) -> EnvironmentStatus:
         status = EnvironmentStatus()
+        if self.mqtt_broker_mode == "spawn":
+            self._ensure_mqtt_broker_ready()
+            status.add(f"Started isolated MQTT broker on {self.mqtt_host}:{self.mqtt_port}")
         self._validate_environment()
         status.add("Validated required binaries and local paths")
         if verify_variants:
@@ -154,6 +183,196 @@ class Runner:
                 raise TestFailure(f"Home Assistant repo path not found: {self.ha_repo_path}")
             status.add("Validated Home Assistant repo path")
         return status
+
+    def validate_dev_environment(self) -> EnvironmentStatus:
+        if self.mqtt_broker_mode == "spawn":
+            self._ensure_mqtt_broker_ready()
+        status = EnvironmentStatus()
+        self._validate_environment()
+        status.add("Validated required binaries and local paths")
+        self._validate_variant_files()
+        status.add("Validated variant YAML inventory")
+        if self.ha_repo_path.exists():
+            status.add("Validated Home Assistant repo path")
+        else:
+            status.add(f"Home Assistant repo path not found: {self.ha_repo_path}")
+        return status
+
+    def _allocate_free_tcp_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(1)
+            return int(sock.getsockname()[1])
+
+    def _detect_runtime_broker_host(self) -> str:
+        if self.mqtt_broker_mode == "spawn":
+            return self.mqtt_host
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                host = sock.getsockname()[0]
+                if host and not host.startswith("127."):
+                    return host
+        except OSError:
+            pass
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM):
+                host = info[4][0]
+                if host and not host.startswith("127."):
+                    return host
+        except OSError:
+            pass
+        if self.mqtt_host and not str(self.mqtt_host).startswith("127."):
+            return self.mqtt_host
+        raise TestFailure(
+            "Could not determine a non-loopback LAN IP for the ESPHome DUT broker. Set a reachable local IP in your environment or pass a non-loopback MQTT host."
+        )
+
+    def _ensure_mqtt_broker_ready(self) -> None:
+        if self.mqtt_broker_mode != "spawn" or self._mqtt_broker_proc is not None:
+            return
+        mosquitto_bin = shutil.which("mosquitto")
+        if mosquitto_bin is None:
+            raise TestFailure("Required command not found: mosquitto")
+        self._log(f"Starting isolated MQTT broker on {self.mqtt_host}:{self.mqtt_port}")
+        self.mqtt_config_path.write_text(
+            "\n".join(
+                (
+                    f"listener {self.mqtt_port} {self.mqtt_host}",
+                    "allow_anonymous true",
+                    "persistence false",
+                )
+            )
+            + "\n"
+        )
+        log_file = self.mqtt_log_path.open("a")
+        self._mqtt_broker_proc = subprocess.Popen(
+            [mosquitto_bin, "-c", str(self.mqtt_config_path)],
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if self._mqtt_broker_proc.poll() is not None:
+                break
+            try:
+                with socket.create_connection((self.mqtt_host, self.mqtt_port), timeout=1.0):
+                    return
+            except OSError:
+                time.sleep(0.2)
+        broker_log = self.mqtt_log_path.read_text() if self.mqtt_log_path.exists() else ""
+        raise TestFailure(
+            f"Spawned MQTT broker failed to become ready on {self.mqtt_host}:{self.mqtt_port}: {broker_log.strip()}"
+        )
+
+    def _stop_mqtt_broker(self) -> None:
+        if self._mqtt_broker_proc is None:
+            return
+        self._log("Stopping isolated MQTT broker")
+        proc = self._mqtt_broker_proc
+        self._mqtt_broker_proc = None
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def _prepare_runtime_suites(self) -> None:
+        if self.mqtt_broker_mode != "external":
+            raise TestFailure(
+                "DUT-backed suites require --mqtt-broker-mode external so the flashed device can reconnect to the broker under test"
+            )
+        variant = "C3-automation" if "esphome.g3" in self.selected_suites else "C3"
+        if self.flush_mqtt_before_runtime:
+            self._log(f"Clearing retained MQTT topics under {self.topic_prefix} before runtime suites")
+            self._clear_runtime_topics()
+        if self.flash_dut_before_runtime:
+            self._flash_runtime_variant(variant)
+        self._wait_for_runtime_availability()
+
+    def _flash_runtime_variant(self, variant: str) -> None:
+        esphome_bin = self.esphome_workspace_path / ".venv" / "bin" / "esphome"
+        yaml_path = self.repo_root / "test" / "variants" / f"{variant}.yaml"
+        if not yaml_path.exists():
+            raise TestFailure(f"Required runtime variant YAML missing: {yaml_path}")
+        runtime_yaml_path = self._prepare_runtime_variant_bundle(yaml_path)
+        yaml_arg = str(runtime_yaml_path.relative_to(self.esphome_workspace_path))
+        cmd = [str(esphome_bin), "run", "--no-logs", yaml_arg]
+        if self.esphome_device:
+            cmd.extend(["--device", self.esphome_device])
+        cmd.extend(self.esphome_run_extra_args)
+        self._log(f"Flashing DUT with runtime variant {variant} using broker host {self.runtime_broker_host}")
+        result = self._run_command(cmd, cwd=self.esphome_workspace_path, check=False)
+        if result.returncode != 0:
+            raise TestFailure(f"Failed to flash DUT with {variant}: {result.stderr.strip() or result.stdout.strip()}")
+
+    def _prepare_runtime_variant_bundle(self, source_yaml_path: Path) -> Path:
+        source_secrets_path = self.repo_root / "test" / "variants" / "secrets.yaml"
+        if not source_secrets_path.exists():
+            raise TestFailure(f"Missing ESPHome test secrets file: {source_secrets_path}")
+        runtime_dir = self.output_dir / "runtime_variants"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_yaml_path = runtime_dir / source_yaml_path.name
+        secrets = self._load_runtime_secrets(source_secrets_path)
+        secrets["mqtt_broker"] = self.runtime_broker_host
+        materialized = source_yaml_path.read_text()
+        component_source = (self.repo_root / "esphome" / "components").resolve()
+        materialized = materialized.replace('../../esphome/components', str(component_source))
+        for key, value in secrets.items():
+            materialized = materialized.replace(f'!secret {key}', f'"{value}"')
+        runtime_yaml_path.write_text(materialized)
+        return runtime_yaml_path
+
+    def _load_runtime_secrets(self, source_secrets_path: Path) -> dict[str, str]:
+        secrets = self._parse_simple_secrets(source_secrets_path)
+        wifi_values = {
+            "wifi_ssid": self.wifi_ssid,
+            "wifi_password": self.wifi_password,
+            "wifi_ap_password": self.wifi_ap_password,
+        }
+        placeholder_map = {
+            "wifi_ssid": "YOUR_WIFI_SSID",
+            "wifi_password": "YOUR_WIFI_PASSWORD",
+            "wifi_ap_password": "YOUR_WIFI_AP_PASSWORD",
+        }
+        for key, value in wifi_values.items():
+            if value:
+                secrets[key] = value
+        missing = [key for key in wifi_values if not secrets.get(key) or secrets.get(key) == placeholder_map[key]]
+        if missing:
+            raise TestFailure(
+                "Missing Wi-Fi secrets for runtime flash: " + ", ".join(missing)
+            )
+        return secrets
+
+    def _parse_simple_secrets(self, secrets_path: Path) -> dict[str, str]:
+        secrets: dict[str, str] = {}
+        for line in secrets_path.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or ":" not in stripped:
+                continue
+            key, value = stripped.split(":", 1)
+            secrets[key.strip()] = value.strip().strip('"').strip("'")
+        return secrets
+
+    def _clear_runtime_topics(self) -> None:
+        topics = [
+            f"{self.topic_prefix}/availability",
+            f"{self.topic_prefix}/traits",
+            f"{self.topic_prefix}/state",
+            f"{self.topic_prefix}/set",
+        ]
+        for topic in topics:
+            self._clear_retained_topic(topic)
+
+    def _clear_retained_topic(self, topic: str) -> None:
+        cmd = ["mosquitto_pub", *self._mosquitto_common(), "-t", topic, "-r", "-n"]
+        result = self._run_command(cmd, check=False)
+        if result.returncode != 0:
+            raise TestFailure(f"Failed to clear retained MQTT topic {topic}: {result.stderr.strip()}")
 
     def _run_esphome_group_1(self) -> GroupResult:
         group = GroupResult("esphome.g1", SUITE_LABELS["esphome.g1"])
@@ -463,11 +682,12 @@ class Runner:
         return group
 
     def _validate_environment(self) -> None:
-        for cmd in ("mosquitto_pub", "mosquitto_sub"):
-            if self.mqtt_user and shutil.which(cmd) is None:
+        required_commands = ["mosquitto_pub", "mosquitto_sub", "python3"]
+        if self.mqtt_broker_mode == "spawn":
+            required_commands.append("mosquitto")
+        for cmd in required_commands:
+            if shutil.which(cmd) is None:
                 raise TestFailure(f"Required command not found: {cmd}")
-        if shutil.which("python3") is None:
-            raise TestFailure("Required command not found: python3")
         esphome_bin = self.esphome_workspace_path / ".venv" / "bin" / "esphome"
         if not esphome_bin.exists():
             raise TestFailure(f"Missing ESPHome CLI under {self.esphome_workspace_path}")
@@ -584,8 +804,8 @@ class Runner:
         if result.returncode != 0:
             raise TestFailure(f"Failed to publish MQTT message to {topic}: {result.stderr.strip()}")
 
-    def _read_retained_topic(self, suffix: str) -> Any:
-        cmd = self._mosquitto_sub_command(topic=f"{self.topic_prefix}/{suffix}", count=1, timeout=4)
+    def _read_retained_topic(self, suffix: str, *, timeout: int = 4) -> Any:
+        cmd = self._mosquitto_sub_command(topic=f"{self.topic_prefix}/{suffix}", count=1, timeout=timeout)
         result = self._run_command(cmd, check=False)
         if result.returncode != 0 or not result.stdout.strip():
             raise TestFailure(f"Failed to read retained MQTT payload for {suffix}: {result.stderr.strip() or result.stdout.strip()}")
@@ -593,6 +813,25 @@ class Runner:
         if suffix == "availability":
             return payload
         return json.loads(payload)
+
+    def _wait_for_runtime_availability(self, timeout: int = 60) -> None:
+        deadline = time.monotonic() + timeout
+        last_error = "Timed out"
+        self._log(f"Waiting for DUT to reconnect and publish retained availability (up to {timeout}s)")
+        while time.monotonic() < deadline:
+            remaining = max(1, min(5, int(deadline - time.monotonic())))
+            try:
+                availability = self._read_retained_topic("availability", timeout=remaining)
+            except TestFailure as err:
+                last_error = str(err)
+                time.sleep(1.0)
+                continue
+            if availability == "online":
+                self._log("DUT retained availability is online")
+                return
+            last_error = f"Unexpected availability payload: {availability}"
+            time.sleep(1.0)
+        raise TestFailure(f"DUT did not publish retained availability after runtime preparation: {last_error}")
 
     def _publish_set_and_capture_state(self, payload: dict[str, Any]) -> dict[str, Any]:
         sub_cmd = self._mosquitto_sub_command(
@@ -717,8 +956,18 @@ class Runner:
     def _count_log_fragment(self, lines: list[str], fragment: str) -> int:
         return sum(1 for line in lines if fragment in line)
 
+    def _mqtt_command_host(self) -> str:
+        if self.mqtt_broker_mode == "external" and str(self.mqtt_host).startswith("127."):
+            return self.runtime_broker_host
+        return self.mqtt_host
+
     def _mosquitto_common(self) -> list[str]:
-        return ["-h", self.mqtt_host, "-p", str(self.mqtt_port), "-u", self.mqtt_user, "-P", self.mqtt_pass]
+        cmd = ["-h", self._mqtt_command_host(), "-p", str(self.mqtt_port)]
+        if self.mqtt_user:
+            cmd.extend(["-u", self.mqtt_user])
+        if self.mqtt_pass:
+            cmd.extend(["-P", self.mqtt_pass])
+        return cmd
 
     def _mosquitto_pub_command(self, *, topic: str, payload: str, retain: bool) -> list[str]:
         cmd = ["mosquitto_pub", *self._mosquitto_common(), "-t", topic, "-m", payload]
@@ -776,6 +1025,9 @@ class Runner:
             raise TestFailure(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
         return result
 
+    def _cleanup(self) -> None:
+        self._stop_mqtt_broker()
+
     def _overall_status(self) -> bool:
         failing_statuses = {"fail", "blocked"} if self.mode == "full-hil" else {"fail"}
         return not any(case.status in failing_statuses for group in self.groups for case in group.cases)
@@ -803,6 +1055,13 @@ class Runner:
             "mode": self.mode,
             "suites": sorted(self.selected_suites, key=SUITE_CHOICES.index),
             "topic_prefix": self.topic_prefix,
+            "mqtt_broker_mode": self.mqtt_broker_mode,
+            "mqtt_host": self.mqtt_host,
+            "mqtt_port": self.mqtt_port,
+            "runtime_broker_host": self.runtime_broker_host,
+            "esphome_device": self.esphome_device,
+            "flush_mqtt_before_runtime": self.flush_mqtt_before_runtime,
+            "flash_dut_before_runtime": self.flash_dut_before_runtime,
             "summary": {"overall": "pass" if self._overall_status() else "fail", **self._summary_counts()},
             "groups": [self._group_to_json(group) for group in self.groups],
         }
@@ -827,6 +1086,10 @@ class Runner:
             f"Mode: `{payload['mode']}`",
             f"Suites: `{', '.join(payload['suites'])}`",
             f"Topic prefix: `{payload['topic_prefix']}`",
+            f"MQTT broker: `{payload['mqtt_broker_mode']}` @ {payload['mqtt_host']}:{payload['mqtt_port']}",
+            f"DUT broker host: `{payload['runtime_broker_host']}`",
+            f"DUT reflashing: `{payload['flash_dut_before_runtime']}`",
+            f"MQTT flush before runtime: `{payload['flush_mqtt_before_runtime']}`",
             "",
             "## Summary",
             "",

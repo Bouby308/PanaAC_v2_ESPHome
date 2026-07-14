@@ -37,10 +37,11 @@ without rewriting the docs or scripts.
 From `esphome/PanaAC_v2_ESPHome`:
 
 ```bash
-python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py dev-env
+python3 test/run_full_test.py setup-env
+python3 test/run_full_test.py run --suite esphome.g1
+python3 test/run_full_test.py run --suite esphome.g2 --mqtt-broker-mode external --esphome-device /dev/ttyUSB0
+python3 test/run_full_test.py run --suite esphome.g3 --mqtt-broker-mode external --esphome-device /dev/ttyUSB0
 ```
 
 ## Environment setup from scratch
@@ -109,7 +110,7 @@ and needs both the firmware and the HA-side integration test environment.
 
    ```bash
    cd HA/esphome/PanaAC_v2_ESPHome
-   python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+   python3 test/run_full_test.py run --suite esphome.g1
    ```
 
 9. Flash the DUT with the required test image:
@@ -148,6 +149,31 @@ and needs both the firmware and the HA-side integration test environment.
 All `esphome` commands run from the workspace `esphome/` dir:
 `cd esphome`.
 
+## Runner config
+
+Before HIL commands, create `test/runner_config.json` from `test/runner_config.example.json` and fill in the broker settings you want to reuse:
+
+```json
+{
+  "mqtt": {
+    "broker_mode": "external",
+    "host": "127.0.0.1",
+    "port": 1883,
+    "user": "mqtt_user",
+    "pass": "mqtt_pass"
+  },
+  "wifi": {
+    "ssid": "YOUR_WIFI_SSID",
+    "password": "YOUR_WIFI_PASSWORD",
+    "ap_password": "YOUR_WIFI_AP_PASSWORD"
+  }
+}
+```
+
+When you use `python3 test/run_full_test.py menu`, the runner will also save prompted MQTT and Wi-Fi credentials into `test/runner_config.json`. Keep `broker_mode` as `external` when you want to target your existing DUT-facing broker. For `esphome.g2` and `esphome.g3`, the runner injects the `wifi` block into the temporary flash YAML and replaces `mqtt_broker` at flash time with the current workstation LAN IP. If the `wifi` block is missing, interactive runs prompt before starting and non-interactive runs fail early with a clear config error.
+
+`dev-env`, `setup-env`, and compile-only runs can use a spawned isolated MQTT broker on a random localhost port. DUT-backed runtime suites still default to `external`, because the flashed device must already be connected to the broker under test. Those runtime suites now also clear retained topics under the test prefix and reflash the DUT with the required test image before execution unless you pass `--no-flush-mqtt` or `--no-flash-dut`.
+
 ## Automated runner entrypoints
 
 From `esphome/PanaAC_v2_ESPHome`:
@@ -155,10 +181,11 @@ From `esphome/PanaAC_v2_ESPHome`:
 ```bash
 python3 test/run_full_test.py list
 python3 test/run_full_test.py menu
-python3 test/run_full_test.py setup-env --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
-python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py dev-env
+python3 test/run_full_test.py setup-env
+python3 test/run_full_test.py run --suite esphome.g1
+python3 test/run_full_test.py run --suite esphome.g2 --mqtt-broker-mode external --esphome-device /dev/ttyUSB0
+python3 test/run_full_test.py run --suite esphome.g3 --mqtt-broker-mode external --esphome-device /dev/ttyUSB0
 ```
 
 From the workspace root `HA/`, the same commands are:
@@ -170,17 +197,17 @@ python3 test/run_full_test.py list
 
 Suite meaning:
 
-- `esphome.g1` covers variant YAML config + compile
-- `ha.g2` covers retained MQTT topics, command round-trip, malformed payloads,
-  and atomic multi-field command behavior against the DUT
-- `ha.g3` covers `climate.control`, lambda `make_call`, `on_state`,
-  `on_control`, and debug-log-assisted DUT observations
+- `dev-env` validates the local ESPHome developer environment only. It defaults to a spawned isolated broker and does not need DUT credentials.
+- `setup-env` validates the runner prerequisites and MQTT round-trip. It defaults to a spawned isolated broker.
+- `esphome.g1` covers variant YAML config + compile and defaults to a spawned isolated broker.
+- `esphome.g2` covers retained MQTT topics, command round-trip, malformed payloads, and atomic multi-field command behavior against the DUT. Use the external broker mode so the flashed device stays connected to the broker under test. Before these suites run, the runner clears retained topics under the test prefix and flashes `C3.yaml` for `esphome.g2` or `C3-automation.yaml` for `esphome.g3`.
+- `esphome.g3` covers `climate.control`, lambda `make_call`, `on_state`, `on_control`, and debug-log-assisted DUT observations. It also expects the external broker mode for the live DUT path. The runner reflashes `C3-automation.yaml` before the suite unless you pass `--no-flash-dut`.
 
 ## Current automation status
 
 - `esphome.g1`: automated and stable
-- `ha.g2`: automated and intended to run with the DUT flashed and connected
-- `ha.g3`: automated and intended to run with `C3-automation.yaml`
+- `esphome.g2`: automated and intended to run with the DUT flashed and connected
+- `esphome.g3`: automated and intended to run with `C3-automation.yaml`
 
 ## Variant YAMLs (Group 1)
 
@@ -197,7 +224,7 @@ For a config-only (no hardware) check you may drop `mqtt`/`wifi` pins, but keep
 Automated path:
 
 ```bash
-python3 test/run_full_test.py run --suite esphome.g1 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite esphome.g1
 ```
 
 For each variant `V` in C1..C6:
@@ -243,7 +270,7 @@ For the automation suites, flash the dedicated automation build:
 Automated path:
 
 ```bash
-python3 test/run_full_test.py run --suite ha.g2 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite esphome.g2 --mqtt-broker-mode external --esphome-device /dev/ttyUSB0
 ```
 
 Subscribe to all DUT topics in one terminal (leave it running):
@@ -284,7 +311,7 @@ transmit and no state change (check the subscribe terminal + DUT log). Result: â
 Automated path:
 
 ```bash
-python3 test/run_full_test.py run --suite ha.g3 --mqtt-user mqtt_user --mqtt-pass mqtt_pass
+python3 test/run_full_test.py run --suite esphome.g3 --mqtt-broker-mode external --esphome-device /dev/ttyUSB0
 ```
 
 Add the following to a test build of the C3 config (e.g. an extra
