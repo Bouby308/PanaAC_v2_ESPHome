@@ -17,6 +17,10 @@ modes**, selected by whether you set `topic_prefix` on the `panaac_v2:` block:
 The IR encode/decode core and the canonical `ac_state` are shared between both modes. See
 [DESIGN.md](DESIGN.md) for the architecture, MQTT contract, and IR protocol.
 
+In this workspace, the custom PanaAC v2 repositories now live under
+`panaac_v2/`, and the consolidated shared test workspace is
+`../PanaAC_v2_Testing`.
+
 ## Features
 
 - Panasonic IR protocol (two-frame, 27-byte) encode + decode
