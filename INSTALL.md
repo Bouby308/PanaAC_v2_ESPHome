@@ -5,16 +5,16 @@
 This component has two modes, picked by whether you set `topic_prefix`:
 
 - **v1 native mode** — omit `topic_prefix`. Native `climate` (named `"<name> (v1)"`) whose
-  Fan Mode carries the full fan levels (Auto / Level 1…5 / Quiet) + two Swing V/H `select`
+  Fan Mode carries the full fan levels (Auto / Level 1…5 / Quiet) + a Swing Vertical `select` and an optional Swing Horizontal `select`
   entities via the ESPHome native API (`api:`) / standard MQTT discovery. **No MQTT broker
   required.** Use `esphome/esphome-panaac-v2-v1mode.yaml` as the starting point. Behaves like
   PanaAC v1.
 - **v2 MQTT mode** — set `topic_prefix` and add a `mqtt:` block. The full-featured climate is
   exposed over the custom MQTT JSON topics (PanaAC v2 HA custom integration, single all-in-one
-  card); the on-device `"<name> (v1)"` climate + two Swing V/H selects are
+  card); the on-device `"<name> (v1)"` climate + a Swing Vertical select and an optional Swing Horizontal select are
   **also kept visible** on the native API. Use `esphome/esphome-panaac-v2.yaml`.
 
-In both modes the `"<name> (v1)"` climate and the two Swing V/H selects
+In both modes the `"<name> (v1)"` climate and the Swing Vertical select are created. The Swing Horizontal select is created only when `swing_horizontal: true`
 are created at the root of the ESPHome device, exactly like PanaAC_ESPHome.
 
 ## What you need
@@ -131,7 +131,7 @@ no effect in v1 mode, where the climate + selects are the user-facing entities.
 
 ## Climate automations
 
-`panaac_v2` now inherits from ESPHome's core `climate` platform, so the standard
+`panaac_v2` now inherits from ESPHome's core `climate` platform, so standard
 automation features are available:
 
 - `climate.control` action:
@@ -142,8 +142,8 @@ automation features are available:
       mode: COOL
       target_temperature: 25°C
       fan_mode: "Level 2"
-      swing_mode: "Middle"
-      swing_horizontal_mode: "Right"
+      swing_mode: BOTH
+      # Granular positions use the companion selects or custom MQTT JSON.
   ```
 
 - Lambda call:

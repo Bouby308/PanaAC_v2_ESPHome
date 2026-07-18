@@ -5,7 +5,7 @@ modes**, selected by whether you set `topic_prefix` on the `panaac_v2:` block:
 
 - **v1 native mode** (`topic_prefix` omitted) — a native `climate` entity (named
   `"<name> (v1)"`) whose Fan Mode offers the full Panasonic fan levels
-  (Auto / Level 1…5 / Quiet), plus two `select` entities (Swing Vertical / Swing Horizontal).
+  (Auto / Level 1…5 / Quiet), plus a Swing Vertical `select` and, when enabled, a Swing Horizontal `select`.
   Exposed via the ESPHome native API / standard MQTT discovery. **No broker required.**
   Behaves like [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome).
 - **v2 MQTT mode** (`topic_prefix` set + a `mqtt:` block) — the full-featured climate is

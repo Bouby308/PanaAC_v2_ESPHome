@@ -6,12 +6,12 @@ This branch unifies PanaAC v1 and v2 behind one component, switched by `topic_pr
 
 - **v1 native mode** (`topic_prefix` unset, `USE_MQTT` undefined): native `climate` whose Fan Mode
   carries the full Panasonic fan levels (Auto / Level 1…5 / Quiet) as custom fan modes (named
-  `"<name> (v1)"`) + two `select` entities (Swing Vertical / Swing Horizontal) over the
-  ESPHome native API / standard MQTT discovery. No broker required. Climate + selects sit at the
+  `"<name> (v1)"`) + a Swing Vertical `select` and, when enabled, a Swing Horizontal `select` over the
+  ESPHome native API / standard MQTT discovery. No broker required. Climate + companion selects sit at the
   root of the ESPHome device, like PanaAC v1.
 - **v2 MQTT mode** (`topic_prefix` set, `USE_MQTT` defined): the full-featured v2 climate is
   exposed over the custom `<prefix>/...` MQTT JSON topics (PanaAC v2 HA custom integration,
-  single card). The same on-device `"<name> (v1)"` climate + two Swing V/H
+  single card). The same on-device `"<name> (v1)"` climate + companion swing
   selects are ALSO kept visible on the native API, at the root of the ESPHome device — exactly
   like PanaAC v1. The native climate carries the standard swing modes (Off/Vertical/Horizontal/
   Both) so its card looks/behaves like PanaAC v1; the granular swing POSITIONS still live on the
@@ -149,11 +149,11 @@ keys that are present are applied; the rest of the internal state is preserved.
 The climate base class stores the public state (`mode`, `target_temperature`,
 `current_temperature`, `custom_fan_mode`, `custom_swing_mode`,
 `swing_horizontal_mode`).  These are mapped to/from the Panasonic IR byte values
-when transmitting or decoding.  The custom mode strings are `const char*` literals
+from `definitions.h`, while the custom MQTT strings are derived from the canonical positions when transmitting or decoding.
 from `definitions.h`, so their lifetime matches the firmware.
 
-Key remaining internal state:
-- `last_swing_v_pos_`, `last_swing_h_pos_` — used so that a future "swing off"
+The `last_swing_*` fields retain the most recently selected fixed positions for canonical state continuity; they are not exposed as separate climate-base accessors.nnKey remaining internal state:
+- `last_swing_v_pos_`, `last_swing_h_pos_` — retained canonical positions used when the component state is synchronized.
   command can fall back to a previously selected fixed position.
 
 ## IR protocol
@@ -209,8 +209,8 @@ climate automation features work:
   call.set_mode("COOL");
   call.set_target_temperature(25.0);
   call.set_fan_mode("Level 2");
-  call.set_swing_mode("Middle");
-  call.set_swing_horizontal_mode("Right");
+  call.set_swing_mode("BOTH");
+  // Use the Swing Vertical/Horizontal select entities for granular positions.
   call.perform();
   ```
 
@@ -222,8 +222,6 @@ climate automation features work:
   id(panaac_v2_climate).current_temperature
   id(panaac_v2_climate).action
   id(panaac_v2_climate).get_custom_fan_mode()
-  id(panaac_v2_climate).get_custom_swing_mode()
-  id(panaac_v2_climate).get_swing_horizontal_mode()
   ```
 
   `action` (`ClimateAction`) is *derived* from the commanded mode by
