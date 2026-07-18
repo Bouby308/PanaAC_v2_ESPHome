@@ -363,6 +363,13 @@ void PanaACV2Climate::publish_state_by_mode_() {
 
 void PanaACV2Climate::control(const climate::ClimateCall &call) {
   bool changed = false;
+  bool invalid_custom_fan = false;
+  if (call.has_custom_fan_mode()) {
+    FanLevel requested_fan;
+    invalid_custom_fan = !parse_fan_level(call.get_custom_fan_mode().c_str(), requested_fan);
+    if (invalid_custom_fan)
+      ESP_LOGW(TAG, "Unsupported custom fan mode: %s", call.get_custom_fan_mode().c_str());
+  }
 
   if (call.get_mode().has_value()) {
     auto mode = *call.get_mode();
@@ -385,22 +392,18 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_target_temperature().has_value()) {
-    float value = *call.get_target_temperature();
-    if (value < PANAAC_TEMP_MIN)
-      value = PANAAC_TEMP_MIN;
-    if (value > PANAAC_TEMP_MAX)
-      value = PANAAC_TEMP_MAX;
+    float value = normalize_target_temperature(*call.get_target_temperature(), this->temp_step_);
     if (this->ac_state.temp != value) {
       this->ac_state.temp = value;
       changed = true;
     }
   }
 
-  if (call.has_custom_fan_mode() || call.get_fan_mode().has_value()) {
+  if ((call.has_custom_fan_mode() || call.get_fan_mode().has_value()) && !invalid_custom_fan) {
     FanLevel level = this->ac_state.fan_level;  // preserve existing granular level within a group
     climate::ClimateFanMode std_mode = this->ac_state.fan_mode;
     if (call.has_custom_fan_mode()) {
-      level = fan_level_from_str(call.get_custom_fan_mode().c_str());
+      parse_fan_level(call.get_custom_fan_mode().c_str(), level);
       std_mode = fan_level_to_standard(level);
     } else {
       std_mode = *call.get_fan_mode();
@@ -562,7 +565,11 @@ void PanaACV2Climate::apply_swingh_select_(SwingHPos pos) {
 
 #ifdef USE_MQTT
 bool PanaACV2Climate::set_swing_mode_if_supported_(const char *mode) {
-  auto pos = swing_v_pos_from_str(mode);
+  SwingVPos pos;
+  if (!parse_swing_v_pos(mode, pos)) {
+    ESP_LOGW(TAG, "Unsupported vertical swing mode: %s", mode);
+    return false;
+  }
   const char *desired = swing_v_pos_to_str(pos);
   if (this->ac_state.swing_v_pos != pos) {
     this->ac_state.swing_v_pos = pos;
@@ -580,8 +587,8 @@ bool PanaACV2Climate::set_swing_horizontal_mode_if_supported_(const char *mode) 
     ESP_LOGW(TAG, "Horizontal swing not supported");
     return false;
   }
-  auto pos = swing_h_pos_from_str(mode);
-  if (pos == PANAAC_SWINGH_NONE) {
+  SwingHPos pos;
+  if (!parse_swing_h_pos(mode, pos)) {
     ESP_LOGW(TAG, "Unsupported horizontal swing mode: %s", mode);
     return false;
   }
@@ -996,10 +1003,20 @@ bool PanaACV2Climate::decode_state_(std::span<const uint8_t> state_bytes, Climat
   // swing
   uint8_t swing_v = state_bytes[PANAAC_BYTEPOS_SWINGV] & 0x0F;
   uint8_t swing_h = state_bytes[PANAAC_BYTEPOS_SWINGH] & 0x0F;
+  if (!is_valid_swing_v_pos(swing_v)) {
+    ESP_LOGV(TAG, "Invalid vertical swing value: 0x%02X", swing_v);
+    return false;
+  }
+  if (this->swing_horizontal_) {
+    if (!is_valid_swing_h_pos(swing_h) || swing_h == PANAAC_SWINGH_NONE) {
+      ESP_LOGV(TAG, "Invalid horizontal swing value: 0x%02X", swing_h);
+      return false;
+    }
+  } else {
+    swing_h = PANAAC_SWINGH_NONE;
+  }
   state.swing_v_pos = static_cast<SwingVPos>(swing_v);
   state.swing_h_pos = static_cast<SwingHPos>(swing_h);
-  if (!this->swing_horizontal_)
-    swing_h = PANAAC_SWINGH_NONE;
   if (swing_v == PANAAC_SWINGV_AUTO && swing_h == PANAAC_SWINGH_AUTO)
     state.swing_mode = climate::CLIMATE_SWING_BOTH;
   else if (swing_v == PANAAC_SWINGV_AUTO)

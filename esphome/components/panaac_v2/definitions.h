@@ -41,6 +41,20 @@ enum Mode : uint8_t {
 static const uint8_t PANAAC_TEMP_MIN = 16;  // Celsius
 static const uint8_t PANAAC_TEMP_MAX = 30;  // Celsius
 
+constexpr float normalize_target_temperature(float value, float configured_step) {
+  const float clamped = value < PANAAC_TEMP_MIN ? PANAAC_TEMP_MIN : (value > PANAAC_TEMP_MAX ? PANAAC_TEMP_MAX : value);
+  const float protocol_step = configured_step >= 0.75f ? 1.0f : 0.5f;
+  const auto increments = static_cast<uint8_t>(((clamped - PANAAC_TEMP_MIN) / protocol_step) + 0.5f);
+  return PANAAC_TEMP_MIN + increments * protocol_step;
+}
+
+static_assert(normalize_target_temperature(15.0f, 0.5f) == 16.0f);
+static_assert(normalize_target_temperature(23.2f, 0.5f) == 23.0f);
+static_assert(normalize_target_temperature(23.3f, 0.5f) == 23.5f);
+static_assert(normalize_target_temperature(23.4f, 1.0f) == 23.0f);
+static_assert(normalize_target_temperature(23.5f, 1.0f) == 24.0f);
+static_assert(normalize_target_temperature(31.0f, 1.0f) == 30.0f);
+
 // Pulse parameters in usec
 const uint16_t PANAAC_BIT_MARK = 550;
 const uint16_t PANAAC_ONE_SPACE = 1200;
@@ -100,6 +114,24 @@ enum SwingHPos : uint8_t {
   PANAAC_SWINGH_RIGHTMAX = 0x0C,
   PANAAC_SWINGH_AUTO = 0x0D,
 };
+
+constexpr bool is_valid_swing_v_pos(uint8_t value) {
+  return value == PANAAC_SWINGV_AUTO || value == PANAAC_SWINGV_HIGHEST || value == PANAAC_SWINGV_HIGH ||
+         value == PANAAC_SWINGV_MIDDLE || value == PANAAC_SWINGV_LOW || value == PANAAC_SWINGV_LOWEST;
+}
+
+constexpr bool is_valid_swing_h_pos(uint8_t value) {
+  return value == PANAAC_SWINGH_NONE || value == PANAAC_SWINGH_MIDDLE || value == PANAAC_SWINGH_LEFTMAX ||
+         value == PANAAC_SWINGH_LEFT || value == PANAAC_SWINGH_RIGHT || value == PANAAC_SWINGH_RIGHTMAX ||
+         value == PANAAC_SWINGH_AUTO;
+}
+
+static_assert(is_valid_swing_v_pos(PANAAC_SWINGV_AUTO));
+static_assert(is_valid_swing_v_pos(PANAAC_SWINGV_LOWEST));
+static_assert(!is_valid_swing_v_pos(0x07));
+static_assert(is_valid_swing_h_pos(PANAAC_SWINGH_NONE));
+static_assert(is_valid_swing_h_pos(PANAAC_SWINGH_RIGHTMAX));
+static_assert(!is_valid_swing_h_pos(0x07));
 
 /// Canonical Panasonic AC state — the single source of truth shared by the climate entity,
 /// the 3 companion selects, the IR encoder/decoder, and (in v2 mode) the MQTT JSON publish.
@@ -161,22 +193,30 @@ inline const char *fan_level_to_str(FanLevel level) {
 }
 
 // Map a user-facing fan-mode string to the Panasonic fan-level byte.
-inline FanLevel fan_level_from_str(const char *value) {
-  if (strcmp(value, STR_FAN_L1) == 0)
-    return PANAAC_FAN_LEVEL_1;
-  if (strcmp(value, STR_FAN_L2) == 0)
-    return PANAAC_FAN_LEVEL_2;
-  if (strcmp(value, STR_FAN_L3) == 0)
-    return PANAAC_FAN_LEVEL_3;
-  if (strcmp(value, STR_FAN_L4) == 0)
-    return PANAAC_FAN_LEVEL_4;
-  if (strcmp(value, STR_FAN_L5) == 0)
-    return PANAAC_FAN_LEVEL_5;
-  if (strcmp(value, STR_FAN_QUIET) == 0)
-    return PANAAC_FAN_QUIET;
-  return PANAAC_FAN_AUTO;
+inline bool parse_fan_level(const char *value, FanLevel &level) {
+  if (strcmp(value, STR_FAN_AUTO) == 0)
+    level = PANAAC_FAN_AUTO;
+  else if (strcmp(value, STR_FAN_L1) == 0)
+    level = PANAAC_FAN_LEVEL_1;
+  else if (strcmp(value, STR_FAN_L2) == 0)
+    level = PANAAC_FAN_LEVEL_2;
+  else if (strcmp(value, STR_FAN_L3) == 0)
+    level = PANAAC_FAN_LEVEL_3;
+  else if (strcmp(value, STR_FAN_L4) == 0)
+    level = PANAAC_FAN_LEVEL_4;
+  else if (strcmp(value, STR_FAN_L5) == 0)
+    level = PANAAC_FAN_LEVEL_5;
+  else if (strcmp(value, STR_FAN_QUIET) == 0)
+    level = PANAAC_FAN_QUIET;
+  else
+    return false;
+  return true;
 }
 
+inline FanLevel fan_level_from_str(const char *value) {
+  FanLevel level;
+  return parse_fan_level(value, level) ? level : PANAAC_FAN_AUTO;
+}
 inline const char *swing_v_pos_to_str(SwingVPos pos) {
   switch (pos) {
     case PANAAC_SWINGV_HIGHEST:
@@ -194,18 +234,27 @@ inline const char *swing_v_pos_to_str(SwingVPos pos) {
   }
 }
 
-inline SwingVPos swing_v_pos_from_str(const char *value) {
+inline bool parse_swing_v_pos(const char *value, SwingVPos &pos) {
   if (strcmp(value, STR_SWINGV_HIGHEST) == 0)
-    return PANAAC_SWINGV_HIGHEST;
-  if (strcmp(value, STR_SWINGV_HIGH) == 0)
-    return PANAAC_SWINGV_HIGH;
-  if (strcmp(value, STR_SWINGV_MIDDLE) == 0)
-    return PANAAC_SWINGV_MIDDLE;
-  if (strcmp(value, STR_SWINGV_LOW) == 0)
-    return PANAAC_SWINGV_LOW;
-  if (strcmp(value, STR_SWINGV_LOWEST) == 0)
-    return PANAAC_SWINGV_LOWEST;
-  return PANAAC_SWINGV_AUTO;
+    pos = PANAAC_SWINGV_HIGHEST;
+  else if (strcmp(value, STR_SWINGV_HIGH) == 0)
+    pos = PANAAC_SWINGV_HIGH;
+  else if (strcmp(value, STR_SWINGV_MIDDLE) == 0)
+    pos = PANAAC_SWINGV_MIDDLE;
+  else if (strcmp(value, STR_SWINGV_LOW) == 0)
+    pos = PANAAC_SWINGV_LOW;
+  else if (strcmp(value, STR_SWINGV_LOWEST) == 0)
+    pos = PANAAC_SWINGV_LOWEST;
+  else if (strcmp(value, STR_SWINGV_AUTO) == 0)
+    pos = PANAAC_SWINGV_AUTO;
+  else
+    return false;
+  return true;
+}
+
+inline SwingVPos swing_v_pos_from_str(const char *value) {
+  SwingVPos pos;
+  return parse_swing_v_pos(value, pos) ? pos : PANAAC_SWINGV_AUTO;
 }
 
 inline const char *swing_h_pos_to_str(SwingHPos pos) {
@@ -227,20 +276,27 @@ inline const char *swing_h_pos_to_str(SwingHPos pos) {
   }
 }
 
-inline SwingHPos swing_h_pos_from_str(const char *value) {
+inline bool parse_swing_h_pos(const char *value, SwingHPos &pos) {
   if (strcmp(value, STR_SWINGH_LEFTMAX) == 0)
-    return PANAAC_SWINGH_LEFTMAX;
-  if (strcmp(value, STR_SWINGH_LEFT) == 0)
-    return PANAAC_SWINGH_LEFT;
-  if (strcmp(value, STR_SWINGH_MIDDLE) == 0)
-    return PANAAC_SWINGH_MIDDLE;
-  if (strcmp(value, STR_SWINGH_RIGHT) == 0)
-    return PANAAC_SWINGH_RIGHT;
-  if (strcmp(value, STR_SWINGH_RIGHTMAX) == 0)
-    return PANAAC_SWINGH_RIGHTMAX;
-  if (strcmp(value, STR_SWINGH_AUTO) == 0)
-    return PANAAC_SWINGH_AUTO;
-  return PANAAC_SWINGH_NONE;
+    pos = PANAAC_SWINGH_LEFTMAX;
+  else if (strcmp(value, STR_SWINGH_LEFT) == 0)
+    pos = PANAAC_SWINGH_LEFT;
+  else if (strcmp(value, STR_SWINGH_MIDDLE) == 0)
+    pos = PANAAC_SWINGH_MIDDLE;
+  else if (strcmp(value, STR_SWINGH_RIGHT) == 0)
+    pos = PANAAC_SWINGH_RIGHT;
+  else if (strcmp(value, STR_SWINGH_RIGHTMAX) == 0)
+    pos = PANAAC_SWINGH_RIGHTMAX;
+  else if (strcmp(value, STR_SWINGH_AUTO) == 0)
+    pos = PANAAC_SWINGH_AUTO;
+  else
+    return false;
+  return true;
+}
+
+inline SwingHPos swing_h_pos_from_str(const char *value) {
+  SwingHPos pos;
+  return parse_swing_h_pos(value, pos) ? pos : PANAAC_SWINGH_NONE;
 }
 
 inline const char *mode_to_str(Mode mode) {

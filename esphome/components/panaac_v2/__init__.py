@@ -60,6 +60,15 @@ CONF_IR_CONTROL = "ir_control"
 CONF_SWINGV_ID = "swingv_id"
 CONF_SWINGH_ID = "swingh_id"
 
+def _validate_temp_step(value):
+    """Accept only target-temperature steps representable by the IR protocol."""
+    step = cv.float_(value)
+    if step not in (0.5, 1.0):
+        raise cv.Invalid("temp_step must be either 0.5 or 1.0")
+    return step
+
+
+
 CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
     cv.Required(CONF_RECEIVER_ID): cv.use_id(remote_base.RemoteReceiverBase),
     cv.Required(CONF_TRANSMITTER_ID): cv.use_id(remote_base.RemoteTransmitterBase),
@@ -71,9 +80,9 @@ CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
     cv.Optional(CONF_SUPPORTS_QUIET, default=False): cv.boolean,
     cv.Optional(CONF_FAN_5LEVEL, default=False): cv.boolean,
     cv.Optional(CONF_SWING_HORIZONTAL, default=False): cv.boolean,
-    cv.Optional(CONF_TEMP_STEP, default=1.0): cv.float_range(min=0.5, max=1.0),
-    cv.Optional(CONF_IR_CONTROL, default=False): cv.boolean,
+    cv.Optional(CONF_TEMP_STEP, default=1.0): _validate_temp_step,
     cv.Optional(CONF_SENSOR): cv.use_id(sensor.Sensor),
+    cv.Optional(CONF_IR_CONTROL, default=False): cv.boolean,
     cv.GenerateID(CONF_SWINGV_ID): cv.declare_id(PanaACV2SwingV),
     cv.GenerateID(CONF_SWINGH_ID): cv.declare_id(PanaACV2SwingH),
 }).extend(cv.COMPONENT_SCHEMA).extend(remote_base.REMOTE_TRANSMITTABLE_SCHEMA).extend(remote_base.REMOTE_LISTENER_SCHEMA)
