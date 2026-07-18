@@ -454,7 +454,9 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
     }
   }
 
+  bool fan_changed = false;
   if ((call.has_custom_fan_mode() || call.get_fan_mode().has_value()) && !invalid_custom_fan) {
+    const FanLevel previous_fan_level = this->ac_state.fan_level;
     FanLevel level = this->ac_state.fan_level;  // preserve existing granular level within a group
     climate::ClimateFanMode std_mode = this->ac_state.fan_mode;
     if (call.has_custom_fan_mode()) {
@@ -501,7 +503,13 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
     if (this->ac_state.fan_level != level) {
       this->ac_state.fan_level = level;
       this->ac_state.fan_mode = std_mode;
+      fan_changed = previous_fan_level != level;
       changed = true;
+    }
+    if (fan_changed && this->ac_state.preset == PANAAC_PRESET_POWERFUL) {
+      this->ac_state.preset = PANAAC_PRESET_NONE;
+      changed = true;
+      ESP_LOGD(TAG, "Fan level changed while Powerful is active; clearing preset");
     }
   }
 
@@ -770,7 +778,9 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
     call.set_fan_mode(v, strlen(v));
   }
   // perform() -> control() applies mode/temp/fan to ac_state (no transmit while active).
+  const FanLevel previous_fan_level = this->ac_state.fan_level;
   call.perform();
+  const bool fan_changed = this->ac_state.fan_level != previous_fan_level;
 
   if (root["preset_mode"].is<const char *>()) {
     Preset requested = PANAAC_PRESET_NONE;
@@ -784,6 +794,14 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
       this->pending_change_ = true;
     }
   }
+  // A fan-level change deactivates Powerful, matching the Panasonic remote behavior. This is
+  // checked after the MQTT preset field so a combined command cannot re-enable it accidentally.
+  if (fan_changed && this->ac_state.preset == PANAAC_PRESET_POWERFUL) {
+    this->ac_state.preset = PANAAC_PRESET_NONE;
+    this->pending_change_ = true;
+    ESP_LOGD(TAG, "Fan level changed while Powerful is active; clearing preset");
+  }
+
   // Panasonic-specific swing strings are applied directly (ESPHome core climate has no custom
   // swing strings); these helpers update ac_state and recompute the combined swing_mode but do
   // not transmit.
