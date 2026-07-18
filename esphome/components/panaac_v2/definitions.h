@@ -74,9 +74,13 @@ const uint8_t PANAAC_BYTEPOS_FAN = 8;
 const uint8_t PANAAC_BYTEPOS_SWINGV = 8;
 const uint8_t PANAAC_BYTEPOS_SWINGH = 9;
 const uint8_t PANAAC_BYTEPOS_QUIET = 13;
+const uint8_t PANAAC_BYTEPOS_POWERFUL = 13;
+const uint8_t PANAAC_BYTEPOS_ECO = 17;
 
 // byte values
 const uint8_t PANAAC_POWER_MASK = 0x01;  // only bit 0 encodes power state
+const uint8_t PANAAC_POWERFUL = 0x01;
+const uint8_t PANAAC_ECO = 0x10;
 const uint8_t PANAAC_POWER_OFF = 0x00;   // bit 0 = 0 -> OFF
 const uint8_t PANAAC_POWER_ON = 0x01;    // bit 0 = 1 -> ON
 
@@ -115,6 +119,12 @@ enum SwingHPos : uint8_t {
   PANAAC_SWINGH_AUTO = 0x0D,
 };
 
+enum Preset : uint8_t {
+  PANAAC_PRESET_NONE = 0,
+  PANAAC_PRESET_POWERFUL = 1,
+  PANAAC_PRESET_ECO = 2,
+};
+
 constexpr bool is_valid_swing_v_pos(uint8_t value) {
   return value == PANAAC_SWINGV_AUTO || value == PANAAC_SWINGV_HIGHEST || value == PANAAC_SWINGV_HIGH ||
          value == PANAAC_SWINGV_MIDDLE || value == PANAAC_SWINGV_LOW || value == PANAAC_SWINGV_LOWEST;
@@ -148,6 +158,7 @@ struct ClimateState {
   SwingHPos swing_h_pos;
   SwingVPos last_swing_v_pos;
   SwingHPos last_swing_h_pos;
+  Preset preset;
 };
 
 static const char *const STR_FAN_AUTO = "Auto";
@@ -171,6 +182,35 @@ static const char *const STR_SWINGH_LEFT = "Left";
 static const char *const STR_SWINGH_MIDDLE = "Middle";
 static const char *const STR_SWINGH_RIGHT = "Right";
 static const char *const STR_SWINGH_RIGHTMAX = "Right Max";
+
+static const char *const STR_PRESET_NONE = "None";
+static const char *const STR_PRESET_POWERFUL = "Powerful";
+static const char *const STR_PRESET_ECO = "Eco";
+
+inline const char *preset_to_str(Preset preset) {
+  switch (preset) {
+    case PANAAC_PRESET_POWERFUL:
+      return STR_PRESET_POWERFUL;
+    case PANAAC_PRESET_ECO:
+      return STR_PRESET_ECO;
+    default:
+      return STR_PRESET_NONE;
+  }
+}
+
+inline bool parse_preset(const char *value, Preset &preset) {
+  if (strcmp(value, STR_PRESET_NONE) == 0 || strcmp(value, "none") == 0) {
+    preset = PANAAC_PRESET_NONE;
+  } else if (strcmp(value, STR_PRESET_POWERFUL) == 0 || strcmp(value, "powerful") == 0 ||
+             strcmp(value, "boost") == 0 || strcmp(value, "BOOST") == 0) {
+    preset = PANAAC_PRESET_POWERFUL;
+  } else if (strcmp(value, STR_PRESET_ECO) == 0 || strcmp(value, "eco") == 0 || strcmp(value, "ECO") == 0) {
+    preset = PANAAC_PRESET_ECO;
+  } else {
+    return false;
+  }
+  return true;
+}
 
 // Map a Panasonic fan-level byte to the user-facing string.
 inline const char *fan_level_to_str(FanLevel level) {

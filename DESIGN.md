@@ -19,7 +19,7 @@ This branch unifies PanaAC v1 and v2 behind one component, switched by `topic_pr
   `ClimateTraits` (`publish_traits_()` is hand-rolled JSON), so the v2 HA card is unaffected.
 
 A canonical `ClimateState ac_state` (mode/temp/fan_level/fan_mode/swing_mode/swing_v_pos/
-swing_h_pos/last_swing_*) is the single source of truth in both modes. The Climate base fields
+swing_h_pos/preset/last_swing_*) is the single source of truth in both modes. The Climate base fields
 (and, in v2 mode, the custom fan/swing strings) are derived from it via `sync_to_climate_()`.
 All v2 MQTT code is wrapped in `#ifdef USE_MQTT` so v1-mode builds link without the mqtt
 component. See [`README.md`](README.md) for the user-facing summary.
@@ -106,6 +106,7 @@ restart cannot leave HA with a stale or empty entity.
   "fan_modes": ["Auto", "Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Quiet"],
   "swing_modes": ["Auto", "Highest", "High", "Middle", "Low", "Lowest"],
   "swing_horizontal_modes": ["Auto", "Left Max", "Left", "Middle", "Right", "Right Max"],
+  "preset_modes": ["None", "Powerful", "Eco"],
   "min_temp": 16,
   "max_temp": 30,
   "temp_step": 0.5,
@@ -122,6 +123,7 @@ restart cannot leave HA with a stale or empty entity.
   "fan_mode": "Level 2",
   "swing_mode": "Middle",
   "swing_horizontal_mode": "Right",
+  "preset_mode": "Powerful",
   "current_temperature": 26.5,
   "available": true
 }
@@ -135,6 +137,14 @@ keys that are present are applied; the rest of the internal state is preserved.
 ```json
 {"fan_mode": "Level 2"}
 ```
+
+Preset commands use the canonical Panasonic names and are validated against the configured capabilities and HVAC mode:
+
+```json
+{"preset_mode": "Eco"}
+```
+
+`Powerful` maps to the native ESPHome `BOOST` preset and IR byte 13 bit 0; `Eco` maps to native `ECO` and IR byte 17 bit 4. `None` clears either preset.
 
 ## C++ class design
 
@@ -280,5 +290,4 @@ a physical remote.
 
 Possible additions that fit the same MQTT contract:
 - power-consumption sensor via separate topic;
-- additional `preset` mode (e.g. eco/sleep) mapped to IR bits;
 - discovery using HA MQTT discovery instead of a custom integration.

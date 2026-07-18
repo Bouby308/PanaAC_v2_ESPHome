@@ -52,6 +52,8 @@ CONF_SUPPORTS_COOL = "supports_cool"
 CONF_SUPPORTS_HEAT = "supports_heat"
 CONF_SUPPORTS_FAN_ONLY = "supports_fan_only"
 CONF_SUPPORTS_QUIET = "supports_quiet"
+CONF_SUPPORTS_POWERFUL = "supports_powerful"
+CONF_SUPPORTS_ECO = "supports_eco"
 CONF_FAN_5LEVEL = "fan_5level"
 CONF_SWING_HORIZONTAL = "swing_horizontal"
 CONF_TEMP_STEP = "temp_step"
@@ -78,6 +80,8 @@ CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
     cv.Optional(CONF_SUPPORTS_HEAT, default=False): cv.boolean,
     cv.Optional(CONF_SUPPORTS_FAN_ONLY, default=False): cv.boolean,
     cv.Optional(CONF_SUPPORTS_QUIET, default=False): cv.boolean,
+    cv.Optional(CONF_SUPPORTS_POWERFUL, default=False): cv.boolean,
+    cv.Optional(CONF_SUPPORTS_ECO, default=False): cv.boolean,
     cv.Optional(CONF_FAN_5LEVEL, default=False): cv.boolean,
     cv.Optional(CONF_SWING_HORIZONTAL, default=False): cv.boolean,
     cv.Optional(CONF_TEMP_STEP, default=1.0): _validate_temp_step,
@@ -157,6 +161,8 @@ async def to_code(config):
     cg.add(var.set_supports_heat(config[CONF_SUPPORTS_HEAT]))
     cg.add(var.set_supports_fan_only(config[CONF_SUPPORTS_FAN_ONLY]))
     cg.add(var.set_supports_quiet(config[CONF_SUPPORTS_QUIET]))
+    cg.add(var.set_supports_powerful(config[CONF_SUPPORTS_POWERFUL]))
+    cg.add(var.set_supports_eco(config[CONF_SUPPORTS_ECO]))
     cg.add(var.set_fan_5level(config[CONF_FAN_5LEVEL]))
     cg.add(var.set_swing_horizontal(config[CONF_SWING_HORIZONTAL]))
     cg.add(var.set_temp_step(config[CONF_TEMP_STEP]))

@@ -115,6 +115,8 @@ panaac_v2:
   supports_heat: true
   supports_fan_only: true
   supports_quiet: true
+  supports_powerful: true
+  supports_eco: true
   fan_5level: true
   swing_horizontal: true
   temp_step: 0.5
@@ -143,6 +145,8 @@ automation features are available:
       target_temperature: 25°C
       fan_mode: "Level 2"
       swing_mode: BOTH
+      preset: BOOST  # Panasonic POWERFUL; use ECO for Eco
+      # Presets are valid in Auto/Cool/Dry and are mutually exclusive.
       # Granular positions use the companion selects or custom MQTT JSON.
   ```
 

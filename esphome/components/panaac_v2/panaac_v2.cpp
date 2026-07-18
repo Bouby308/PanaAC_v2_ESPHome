@@ -44,6 +44,19 @@ inline climate::ClimateFanMode fan_level_to_standard(FanLevel level) {
       return climate::CLIMATE_FAN_AUTO;
   }
 }
+
+inline bool mode_supports_preset(climate::ClimateMode mode) {
+  return mode == climate::CLIMATE_MODE_AUTO || mode == climate::CLIMATE_MODE_COOL || mode == climate::CLIMATE_MODE_DRY;
+}
+
+inline climate::ClimatePreset preset_to_climate(Preset preset) {
+  return preset == PANAAC_PRESET_POWERFUL ? climate::CLIMATE_PRESET_BOOST : climate::CLIMATE_PRESET_ECO;
+}
+
+inline bool preset_is_supported(Preset preset, bool supports_powerful, bool supports_eco) {
+  return preset == PANAAC_PRESET_NONE ||
+         (preset == PANAAC_PRESET_POWERFUL && supports_powerful) || (preset == PANAAC_PRESET_ECO && supports_eco);
+}
 }  // namespace
 
 PanaACV2Climate::PanaACV2Climate() {
@@ -62,6 +75,7 @@ PanaACV2Climate::PanaACV2Climate() {
   this->ac_state.swing_h_pos = PANAAC_SWINGH_AUTO;
   this->ac_state.last_swing_v_pos = PANAAC_SWINGV_MIDDLE;
   this->ac_state.last_swing_h_pos = PANAAC_SWINGH_MIDDLE;
+  this->ac_state.preset = PANAAC_PRESET_NONE;
 }
 
 // ---------------- setup / loop ----------------
@@ -141,6 +155,16 @@ void PanaACV2Climate::setup() {
   // Derive canonical ac_state from the restored Climate fields (do NOT transmit on boot — the
   // AC must not be commanded just because the ESP booted).
   this->ac_state.mode = this->mode;
+  this->ac_state.preset = PANAAC_PRESET_NONE;
+  if (this->preset.has_value()) {
+    if (*this->preset == climate::CLIMATE_PRESET_BOOST)
+      this->ac_state.preset = PANAAC_PRESET_POWERFUL;
+    else if (*this->preset == climate::CLIMATE_PRESET_ECO)
+      this->ac_state.preset = PANAAC_PRESET_ECO;
+  }
+  if (!preset_is_supported(this->ac_state.preset, this->supports_powerful_, this->supports_eco_) ||
+      !mode_supports_preset(this->ac_state.mode))
+    this->ac_state.preset = PANAAC_PRESET_NONE;
   this->ac_state.temp = this->target_temperature;
   if (this->has_custom_fan_mode()) {
     this->ac_state.fan_level = fan_level_from_str(this->get_custom_fan_mode().c_str());
@@ -239,6 +263,10 @@ climate::ClimateTraits PanaACV2Climate::traits() {
     traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
     traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
   }
+  if (this->supports_powerful_)
+    traits.add_supported_preset(climate::CLIMATE_PRESET_BOOST);
+  if (this->supports_eco_)
+    traits.add_supported_preset(climate::CLIMATE_PRESET_ECO);
 
   traits.set_visual_min_temperature(PANAAC_TEMP_MIN);
   traits.set_visual_max_temperature(PANAAC_TEMP_MAX);
@@ -259,6 +287,8 @@ void PanaACV2Climate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Supports heat: %s", YESNO(this->supports_heat_));
   ESP_LOGCONFIG(TAG, "  Supports fan-only: %s", YESNO(this->supports_fan_only_));
   ESP_LOGCONFIG(TAG, "  Supports quiet: %s", YESNO(this->supports_quiet_));
+  ESP_LOGCONFIG(TAG, "  Supports powerful: %s", YESNO(this->supports_powerful_));
+  ESP_LOGCONFIG(TAG, "  Supports eco: %s", YESNO(this->supports_eco_));
   ESP_LOGCONFIG(TAG, "  Swing horizontal: %s", YESNO(this->swing_horizontal_));
   ESP_LOGCONFIG(TAG, "  IR control (38kHz): %s", YESNO(this->ir_control_));
   if (this->sensor_ != nullptr) {
@@ -296,6 +326,7 @@ void PanaACV2Climate::sync_to_climate_() {
     this->swing_mode = ac_state.swing_mode;
   }
 
+  this->set_preset_(preset_to_climate(ac_state.preset));
   this->update_action_();
 }
 
@@ -391,6 +422,30 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
     }
   }
 
+  if (!mode_supports_preset(this->ac_state.mode) && this->ac_state.preset != PANAAC_PRESET_NONE) {
+    this->ac_state.preset = PANAAC_PRESET_NONE;
+    changed = true;
+  }
+  if (call.get_preset().has_value()) {
+    Preset requested = PANAAC_PRESET_NONE;
+    const auto native_preset = *call.get_preset();
+    if (native_preset == climate::CLIMATE_PRESET_BOOST)
+      requested = PANAAC_PRESET_POWERFUL;
+    else if (native_preset == climate::CLIMATE_PRESET_ECO)
+      requested = PANAAC_PRESET_ECO;
+    else if (native_preset != climate::CLIMATE_PRESET_NONE) {
+      ESP_LOGW(TAG, "Unsupported preset");
+      requested = this->ac_state.preset;
+    }
+    if (requested != this->ac_state.preset &&
+        (!preset_is_supported(requested, this->supports_powerful_, this->supports_eco_) ||
+         (requested != PANAAC_PRESET_NONE && !mode_supports_preset(this->ac_state.mode)))) {
+      ESP_LOGW(TAG, "Preset %s is not supported in the current configuration or HVAC mode", preset_to_str(requested));
+    } else if (requested != this->ac_state.preset) {
+      this->ac_state.preset = requested;
+      changed = true;
+    }
+  }
   if (call.get_target_temperature().has_value()) {
     float value = normalize_target_temperature(*call.get_target_temperature(), this->temp_step_);
     if (this->ac_state.temp != value) {
@@ -612,6 +667,8 @@ void PanaACV2Climate::publish_state_() {
     root["mode"] = mode_to_str(climate_mode_to_mode(this->ac_state.mode));
     root["target_temperature"] = this->ac_state.temp;
     root["fan_mode"] = fan_level_to_str(this->ac_state.fan_level);
+    if (this->supports_powerful_ || this->supports_eco_)
+      root["preset_mode"] = preset_to_str(this->ac_state.preset);
     root["swing_mode"] = swing_v_pos_to_str(this->ac_state.swing_v_pos);
     if (this->swing_horizontal_)
       root["swing_horizontal_mode"] = swing_h_pos_to_str(this->ac_state.swing_h_pos);
@@ -658,6 +715,14 @@ void PanaACV2Climate::publish_traits_() {
     swing_modes.add(STR_SWINGV_LOW);
     swing_modes.add(STR_SWINGV_LOWEST);
 
+    if (this->supports_powerful_ || this->supports_eco_) {
+      JsonArray preset_modes = root["preset_modes"].to<JsonArray>();
+      preset_modes.add(STR_PRESET_NONE);
+      if (this->supports_powerful_)
+        preset_modes.add(STR_PRESET_POWERFUL);
+      if (this->supports_eco_)
+        preset_modes.add(STR_PRESET_ECO);
+    }
     if (this->swing_horizontal_) {
       JsonArray h_modes = root["swing_horizontal_modes"].to<JsonArray>();
       h_modes.add(STR_SWINGH_AUTO);
@@ -707,6 +772,18 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
   // perform() -> control() applies mode/temp/fan to ac_state (no transmit while active).
   call.perform();
 
+  if (root["preset_mode"].is<const char *>()) {
+    Preset requested = PANAAC_PRESET_NONE;
+    const char *value = root["preset_mode"];
+    if (!parse_preset(value, requested) ||
+        !preset_is_supported(requested, this->supports_powerful_, this->supports_eco_) ||
+        (requested != PANAAC_PRESET_NONE && !mode_supports_preset(this->ac_state.mode))) {
+      ESP_LOGW(TAG, "Unsupported or incompatible preset command: %s", value);
+    } else if (requested != this->ac_state.preset) {
+      this->ac_state.preset = requested;
+      this->pending_change_ = true;
+    }
+  }
   // Panasonic-specific swing strings are applied directly (ESPHome core climate has no custom
   // swing strings); these helpers update ac_state and recompute the combined swing_mode but do
   // not transmit.
@@ -779,6 +856,12 @@ void PanaACV2Climate::transmit_data_() {
     second_frame[PANAAC_BYTEPOS_QUIET] |= PANAAC_FAN_QUIET;
   }
   second_frame[PANAAC_BYTEPOS_FAN] |= this->ac_state.fan_level;
+
+  // Panasonic preset bits. POWERFUL and ECO are mutually exclusive.
+  if (this->ac_state.preset == PANAAC_PRESET_POWERFUL && this->supports_powerful_)
+    second_frame[PANAAC_BYTEPOS_POWERFUL] |= PANAAC_POWERFUL;
+  else if (this->ac_state.preset == PANAAC_PRESET_ECO && this->supports_eco_)
+    second_frame[PANAAC_BYTEPOS_ECO] |= PANAAC_ECO;
 
   // swing
   second_frame[PANAAC_BYTEPOS_SWINGV] |= this->ac_state.swing_v_pos;
@@ -1000,6 +1083,18 @@ bool PanaACV2Climate::decode_state_(std::span<const uint8_t> state_bytes, Climat
     state.fan_level = PANAAC_FAN_QUIET;
   }
 
+  const bool powerful = (state_bytes[PANAAC_BYTEPOS_POWERFUL] & PANAAC_POWERFUL) != 0;
+  const bool eco = (state_bytes[PANAAC_BYTEPOS_ECO] & PANAAC_ECO) != 0;
+  if (powerful && eco) {
+    ESP_LOGV(TAG, "Invalid frame: POWERFUL and ECO are both active");
+    return false;
+  }
+  state.preset = powerful ? PANAAC_PRESET_POWERFUL : (eco ? PANAAC_PRESET_ECO : PANAAC_PRESET_NONE);
+  if (!preset_is_supported(state.preset, this->supports_powerful_, this->supports_eco_) ||
+      (state.preset != PANAAC_PRESET_NONE && !mode_supports_preset(state.mode))) {
+    ESP_LOGV(TAG, "Preset is unsupported or incompatible with the decoded HVAC mode");
+    return false;
+  }
   // swing
   uint8_t swing_v = state_bytes[PANAAC_BYTEPOS_SWINGV] & 0x0F;
   uint8_t swing_h = state_bytes[PANAAC_BYTEPOS_SWINGH] & 0x0F;

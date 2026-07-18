@@ -74,6 +74,8 @@ class PanaACV2Climate : public climate::Climate,
   void set_supports_heat(bool supports) { this->supports_heat_ = supports; }
   void set_supports_fan_only(bool supports) { this->supports_fan_only_ = supports; }
   void set_supports_quiet(bool supports) { this->supports_quiet_ = supports; }
+  void set_supports_powerful(bool supports) { this->supports_powerful_ = supports; }
+  void set_supports_eco(bool supports) { this->supports_eco_ = supports; }
   void set_fan_5level(bool fan_5level) { this->fan_5level_ = fan_5level; }
   void set_swing_horizontal(bool swing_horizontal) { this->swing_horizontal_ = swing_horizontal; }
   void set_temp_step(float temp_step) { this->temp_step_ = temp_step; }
@@ -135,6 +137,8 @@ class PanaACV2Climate : public climate::Climate,
 
   bool supports_cool_{true};
   bool supports_heat_{false};
+  bool supports_powerful_{false};
+  bool supports_eco_{false};
   bool supports_fan_only_{false};
   bool supports_quiet_{false};
   bool fan_5level_{false};
