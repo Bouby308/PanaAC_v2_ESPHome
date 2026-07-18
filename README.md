@@ -62,6 +62,22 @@ Then add a `panaac_v2:` block. Start from an example:
 See [INSTALL.md](INSTALL.md) for step-by-step hardware, compile, flash, and verify instructions
 (including the required `secrets.yaml` for v2 mode).
 
+To group the native climate and Swing V/H entities under one ESPHome sub-device, define an
+ESPHome device and set `device_id` on `panaac_v2:`:
+
+```yaml
+esphome:
+  devices:
+    - id: hvac
+      name: Living Room AC
+
+panaac_v2:
+  device_id: hvac
+```
+
+The PanaAC v2 Home Assistant integration remains a single climate entity; swing controls are not
+created as separate HA swing entities.
+
 ## Configuration keys
 
 | Key | Default | Effect |
@@ -77,6 +93,7 @@ See [INSTALL.md](INSTALL.md) for step-by-step hardware, compile, flash, and veri
 | `temp_step` | 1.0 | Visual temperature step (0.5 or 1.0). |
 | `ir_control` | false | `true` = real IR LED (38 kHz carrier); `false` = direct-wired. |
 | `sensor` | _(none)_ | Current-temperature sensor. |
+| `device_id` | _(none)_ | Optional ESPHome sub-device ID shared by the native climate and Swing V/H entities. Does not create separate Home Assistant swing entities. |
 
 > **Note:** in v2 mode the build fails if `topic_prefix` is set without a global `mqtt:` block.
 

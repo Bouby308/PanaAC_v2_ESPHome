@@ -8,6 +8,12 @@ esphome:
   min_version: 2025.9.0
   name_add_mac_suffix: false
 
+  # Optional ESPHome sub-device grouping. When enabled, the native climate entity and
+  # companion Swing V/H selects are all assigned to this HVAC sub-device.
+  # devices:
+  #   - id: hvac
+  #     name: Living Room AC
+
 # Load the panaac_v2 custom component from the sibling components/ folder.
 external_components:
   - source: components
@@ -88,6 +94,8 @@ sensor:
 
 panaac_v2:
   name: "Remote Controller"
+  # Optional: assign the climate and Swing V/H entities to an ESPHome sub-device.
+  # device_id: hvac
   id: panaac_v2_climate
   receiver_id: ir_receiver
   transmitter_id: ir_transmitter
