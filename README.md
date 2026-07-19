@@ -1,5 +1,9 @@
 # PanaAC v2 — Panasonic AC controller for ESPHome
 
+**_This project is maintained in my free time. A coffee ☕ is always appreciated!_**
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/hoangminh1109)
+
 Custom ESPHome external component that drives a Panasonic AC over infrared. It runs in **two
 modes**, selected by whether you set `topic_prefix` on the `panaac_v2:` block:
 
