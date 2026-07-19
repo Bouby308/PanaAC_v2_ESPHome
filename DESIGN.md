@@ -106,7 +106,7 @@ restart cannot leave HA with a stale or empty entity.
   "fan_modes": ["Auto", "Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Quiet", "Powerful"],
   "swing_modes": ["Auto", "Highest", "High", "Middle", "Low", "Lowest"],
   "swing_horizontal_modes": ["Auto", "Left Max", "Left", "Middle", "Right", "Right Max"],
-  "preset_modes": ["Normal", "Powerful", "Eco"],
+  "preset_modes": ["None", "Powerful", "Eco"],
   "min_temp": 16,
   "max_temp": 30,
   "temp_step": 0.5,
@@ -144,7 +144,7 @@ Preset commands use the canonical Panasonic names and are validated against the 
 {"preset_mode": "Eco"}
 ```
 
-`Powerful` maps to the native ESPHome `BOOST` preset and IR byte 13 bit 0; `Eco` maps to native `ECO` and IR byte 17 bit 4. `Normal` clears either preset.
+The native ESPHome climate exposes built-in `NONE` (`None`), `BOOST` (`Boost`), and `ECO` (`Eco`) presets. The v2 MQTT interface uses `None`, `Powerful`, and `Eco`; `Powerful` maps to native `BOOST` and IR byte 13 bit 0, while `Eco` maps to native `ECO` and IR byte 17 bit 4. `None` clears either preset.
 
 ## C++ class design
 

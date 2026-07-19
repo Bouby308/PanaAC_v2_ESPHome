@@ -47,7 +47,7 @@ inline climate::ClimateFanMode fan_level_to_standard(FanLevel level) {
 
 inline bool mode_supports_preset(climate::ClimateMode mode) {
   return mode == climate::CLIMATE_MODE_AUTO || mode == climate::CLIMATE_MODE_COOL ||
-         mode == climate::CLIMATE_MODE_HEAT || mode == climate::CLIMATE_MODE_DRY;
+         mode == climate::CLIMATE_MODE_DRY;
 }
 
 inline climate::ClimatePreset preset_to_climate(Preset preset) {
@@ -113,17 +113,6 @@ void PanaACV2Climate::setup() {
     if (this->supports_powerful_)
       fan_modes.push_back(STR_FAN_POWERFUL);
     this->set_supported_custom_fan_modes(fan_modes);
-  }
-
-  // Use custom names so the native ESPHome API exposes the same user-facing preset labels as
-  // the v2 MQTT/HA integration: Normal, Powerful, and Eco.
-  if (this->supports_powerful_ || this->supports_eco_) {
-    std::vector<const char *> presets = {STR_PRESET_NORMAL};
-    if (this->supports_powerful_)
-      presets.push_back(STR_PRESET_POWERFUL);
-    if (this->supports_eco_)
-      presets.push_back(STR_PRESET_ECO);
-    this->set_supported_custom_presets(presets);
   }
 
   // Fill the companion Swing V/H selects' options at runtime. (The Fan Level select is gone — fan
@@ -285,7 +274,13 @@ climate::ClimateTraits PanaACV2Climate::traits() {
     traits.add_supported_swing_mode(climate::CLIMATE_SWING_HORIZONTAL);
     traits.add_supported_swing_mode(climate::CLIMATE_SWING_BOTH);
   }
-  // Presets use custom names registered in setup(): Normal, Powerful, and Eco.
+  if (this->supports_powerful_ || this->supports_eco_) {
+    traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
+    if (this->supports_powerful_)
+      traits.add_supported_preset(climate::CLIMATE_PRESET_BOOST);
+    if (this->supports_eco_)
+      traits.add_supported_preset(climate::CLIMATE_PRESET_ECO);
+  }
 
   traits.set_visual_min_temperature(PANAAC_TEMP_MIN);
   traits.set_visual_max_temperature(PANAAC_TEMP_MAX);
@@ -347,12 +342,7 @@ void PanaACV2Climate::sync_to_climate_() {
     this->swing_mode = ac_state.swing_mode;
   }
 
-  if (this->supports_powerful_ || this->supports_eco_) {
-    const char *preset_str = preset_to_str(ac_state.preset);
-    this->set_custom_preset_(preset_str, strlen(preset_str));
-  } else {
-    this->set_preset_(climate::CLIMATE_PRESET_NONE);
-  }
+  this->set_preset_(preset_to_climate(ac_state.preset));
   this->update_action_();
 }
 
@@ -459,22 +449,18 @@ void PanaACV2Climate::control(const climate::ClimateCall &call) {
     this->ac_state.preset = PANAAC_PRESET_NONE;
     changed = true;
   }
-  if (call.has_custom_preset() || call.get_preset().has_value()) {
+  if (call.get_preset().has_value()) {
     Preset requested = this->ac_state.preset;
     bool valid_preset = true;
-    if (call.has_custom_preset()) {
-      valid_preset = parse_preset(call.get_custom_preset().c_str(), requested);
-    } else {
-      const auto native_preset = *call.get_preset();
-      if (native_preset == climate::CLIMATE_PRESET_BOOST)
-        requested = PANAAC_PRESET_POWERFUL;
-      else if (native_preset == climate::CLIMATE_PRESET_ECO)
-        requested = PANAAC_PRESET_ECO;
-      else if (native_preset == climate::CLIMATE_PRESET_NONE)
-        requested = PANAAC_PRESET_NONE;
-      else
-        valid_preset = false;
-    }
+    const auto native_preset = *call.get_preset();
+    if (native_preset == climate::CLIMATE_PRESET_BOOST)
+      requested = PANAAC_PRESET_POWERFUL;
+    else if (native_preset == climate::CLIMATE_PRESET_ECO)
+      requested = PANAAC_PRESET_ECO;
+    else if (native_preset == climate::CLIMATE_PRESET_NONE)
+      requested = PANAAC_PRESET_NONE;
+    else
+      valid_preset = false;
     if (!valid_preset ||
         !preset_is_supported(requested, this->supports_powerful_, this->supports_eco_) ||
         (requested != PANAAC_PRESET_NONE && !mode_supports_preset(this->ac_state.mode))) {
@@ -774,7 +760,7 @@ void PanaACV2Climate::publish_traits_() {
 
     if (this->supports_powerful_ || this->supports_eco_) {
       JsonArray preset_modes = root["preset_modes"].to<JsonArray>();
-      preset_modes.add(STR_PRESET_NORMAL);
+      preset_modes.add(STR_PRESET_NONE);
       if (this->supports_powerful_)
         preset_modes.add(STR_PRESET_POWERFUL);
       if (this->supports_eco_)
@@ -845,7 +831,10 @@ void PanaACV2Climate::on_set_json_(const std::string &topic, JsonObject root) {
   }
   // A fan-level change deactivates Powerful, matching the Panasonic remote behavior. This is
   // checked after the MQTT preset field so a combined command cannot re-enable it accidentally.
-  if ((fan_changed || root["fan_mode"].is<const char *>()) && this->ac_state.preset == PANAAC_PRESET_POWERFUL) {
+  const bool powerful_fan_requested = root["fan_mode"].is<const char *>() &&
+                                      strcmp(root["fan_mode"].as<const char *>(), STR_FAN_POWERFUL) == 0;
+  if ((fan_changed || (root["fan_mode"].is<const char *>() && !powerful_fan_requested)) &&
+      this->ac_state.preset == PANAAC_PRESET_POWERFUL) {
     this->ac_state.preset = PANAAC_PRESET_NONE;
     this->pending_change_ = true;
     ESP_LOGD(TAG, "Explicit non-Powerful fan mode selected while Powerful is active; clearing preset");

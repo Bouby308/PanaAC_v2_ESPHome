@@ -184,7 +184,7 @@ static const char *const STR_SWINGH_MIDDLE = "Middle";
 static const char *const STR_SWINGH_RIGHT = "Right";
 static const char *const STR_SWINGH_RIGHTMAX = "Right Max";
 
-static const char *const STR_PRESET_NORMAL = "Normal";
+static const char *const STR_PRESET_NONE = "None";
 static const char *const STR_PRESET_POWERFUL = "Powerful";
 static const char *const STR_PRESET_ECO = "Eco";
 
@@ -195,13 +195,12 @@ inline const char *preset_to_str(Preset preset) {
     case PANAAC_PRESET_ECO:
       return STR_PRESET_ECO;
     default:
-      return STR_PRESET_NORMAL;
+      return STR_PRESET_NONE;
   }
 }
 
 inline bool parse_preset(const char *value, Preset &preset) {
-  if (strcmp(value, STR_PRESET_NORMAL) == 0 || strcmp(value, "normal") == 0 ||
-      strcmp(value, "None") == 0 || strcmp(value, "none") == 0) {
+  if (strcmp(value, STR_PRESET_NONE) == 0 || strcmp(value, "none") == 0) {
     preset = PANAAC_PRESET_NONE;
   } else if (strcmp(value, STR_PRESET_POWERFUL) == 0 || strcmp(value, "powerful") == 0 ||
              strcmp(value, "boost") == 0 || strcmp(value, "BOOST") == 0) {
