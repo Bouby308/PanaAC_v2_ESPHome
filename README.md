@@ -4,19 +4,39 @@
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/hoangminh1109)
 
-Custom ESPHome external component that drives a Panasonic AC over infrared. It runs in **two
-modes**, selected by whether you set `topic_prefix` on the `panaac_v2:` block:
+Custom ESPHome external component that drives a Panasonic AC over infrared.
 
+------
+
+This is the second generation of [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome) (PanaAC v1). It addresses the earlier UI limitation of separate fan-level, vertical-swing, and horizontal-swing selects:
+
+  - PanaAC v1 exposes separate fan-level, vertical-swing, and horizontal-swing selects alongside the climate entity in the ESPHome device.
+
+    <img src="assets/screenshot_panaac.png" alt="PanaAC v1" width="50%">
+  - PanaAC v2 combines those controls in the climate entity through the [`PanaAC_v2_HA`](https://github.com/hoangminh1109/PanaAC_v2_HA) integration, providing a cleaner climate-card UI. The native `(v1)` climate and selects remain available by default; in v2 MQTT mode, set `hide_legacy_comps: true` to hide them from Home Assistant and use only the PanaAC v2 climate entity.
+
+    <img src="assets/screenshot_panaac_v2.png" alt="PanaAC v2" width="50%"> <img src="assets/screenshot_panaac_v2_tilecard.png" alt="PanaAC v2" width="40%">
+
+- Implemented contributor features:
+  - POWERFUL/ECO presets & `device_id` grouping (from [`@axa88`](https://github.com/axa88))
+- Planned feature:
+  - **[UPCOMING]** Humidity sensor support (from [`@anhthao8x`](https://github.com/anhthao8x)).
+
+-------
+
+It runs in **two modes**, selected by whether you set `topic_prefix` on the
+`panaac_v2:` block:
+
+- **v2 MQTT mode** (`topic_prefix` set + a `mqtt:` block) — the full-featured climate is
+  exposed over custom `<prefix>/state|traits|availability|set` MQTT JSON topics, consumed by
+  the [`PanaAC v2 HA custom integration`](https://github.com/hoangminh1109/PanaAC_v2_HA) as a
+  single all-in-one climate card. The on-device `(v1)` climate and selects stay visible on the
+  native API by default. Set `hide_legacy_comps: true` to hide them from Home Assistant.
 - **v1 native mode** (`topic_prefix` omitted) — a native `climate` entity (named
   `"<name> (v1)"`) whose Fan Mode offers the full Panasonic fan levels
   (Auto / Level 1…5 / Quiet), plus a Swing Vertical `select` and, when enabled, a Swing Horizontal `select`.
   Exposed via the ESPHome native API / standard MQTT discovery. **No broker required.**
   Behaves like [`PanaAC_ESPHome`](https://github.com/hoangminh1109/PanaAC_ESPHome).
-- **v2 MQTT mode** (`topic_prefix` set + a `mqtt:` block) — the full-featured climate is
-  exposed over custom `<prefix>/state|traits|availability|set` MQTT JSON topics, consumed by
-  the [`PanaAC v2 HA custom integration`](https://github.com/hoangminh1109/PanaAC_v2_HA) as a
-  single all-in-one climate card. The on-device `(v1)` climate + selects stay visible on the
-  native API too.
 
 The IR encode/decode core and the canonical `ac_state` are shared between both modes. See
 [DESIGN.md](DESIGN.md) for the architecture, MQTT contract, and IR protocol.
