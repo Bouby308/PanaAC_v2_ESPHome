@@ -1,4 +1,4 @@
-# PanaAC v2 — Panasonic AC controller for ESPHome
+# PanaAC v2 — Panasonic AC Infrared controller for ESPHome
 
 **_This project is maintained in my free time. A coffee ☕ is always appreciated!_**
 
@@ -134,3 +134,7 @@ full topic contract, payloads, and the reconnect-republish behaviour.
 - [DESIGN.md](DESIGN.md) — architecture, MQTT topic contract, IR protocol, startup/reconnect
   behaviour.
 - [INSTALL.md](INSTALL.md) — hardware, compile, flash, and verify.
+
+## AI GENERATED CONTENTS
+
+- This PanaAC v2 project is vibe coded with the help of AI Agents (Codex & Claude), using various models cross checked each other - gpt 5.5, gpt 5.6, opus 4.6, glm 5.2, minimax-m3, kimi-k2.7-code).
