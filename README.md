@@ -24,10 +24,10 @@ In this workspace, the custom PanaAC v2 repositories now live under
 ## Features
 
 - Panasonic IR protocol (two-frame, 27-byte) encode + decode
-- Full fan levels: Auto, Level 1–5, Quiet (3- or 5-level, configurable)
+- Full fan levels: Auto, Level 1–5, Quiet, and conditional Powerful (3- or 5-level, configurable)
 - Vertical swing positions: Auto, Highest, High, Middle, Low, Lowest
 - Separate horizontal swing axis: Auto, Left Max, Left, Middle, Right, Right Max
-- Optional Powerful and Eco presets (Auto/Cool/Dry only)
+- Optional Normal, Powerful, and Eco preset modes (Auto/Cool/Dry only)
 - IR receiver syncs state from the physical remote
 - v2 MQTT mode with retained `traits`/`state` and auto-configured availability (republished
   on every reconnect)
@@ -87,7 +87,7 @@ created as separate HA swing entities.
 | `receiver_id` / `transmitter_id` | required | The `remote_receiver` / `remote_transmitter` ids. |
 | `supports_cool` / `supports_heat` / `supports_fan_only` | true / false / false | Advertise those HVAC modes. |
 | `supports_quiet` | false | Add the Quiet fan level. |
-| `supports_powerful` / `supports_eco` | false / false | Advertise the Powerful/Eco presets. Presets are mutually exclusive and valid in Auto/Cool/Dry. |
+| `supports_powerful` / `supports_eco` | false / false | Advertise Normal/Powerful/Eco presets. Powerful also adds a coupled Powerful fan mode. Presets are mutually exclusive and valid in Auto/Cool/Heat/Dry. |
 | `fan_5level` | false | 5 fan levels (Level 1…5) vs 3 (Level 1/3/5). |
 | `swing_horizontal` | false | Enable horizontal swing + the Swing Horizontal select. |
 | `temp_step` | 1.0 | Visual temperature step (0.5 or 1.0). |
