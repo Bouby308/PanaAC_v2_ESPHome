@@ -61,12 +61,6 @@ In this workspace, the custom PanaAC v2 repositories now live under
 - ESP8266 or ESP32 (tested on Wemos D1 mini / ESP8266, 4 MB flash)
 - ESPHome CLI `2025.9.0+`
 
-## Wiring
-
-Non-invasive default: **GPIO14 (D5)** = IR receiver data pin (inverted), **GPIO13 (D7)** = IR
-LED anode via transistor (38 kHz carrier when `ir_control: true`). See [INSTALL.md](INSTALL.md)
-for the full wiring table and the invasive direct-wired option.
-
 ## Installation
 
 Load the component from the `components` folder:
