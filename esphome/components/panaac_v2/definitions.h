@@ -18,6 +18,7 @@
 
 #include "esphome/components/climate/climate_mode.h"
 #include "esphome/core/log.h"
+#include <array>
 #include <cinttypes>
 #include <cstdlib>
 #include <cstring>
@@ -97,7 +98,22 @@ enum FanLevel : uint8_t {
   PANAAC_FAN_LEVEL_3 = 0x50,
   PANAAC_FAN_LEVEL_4 = 0x60,
   PANAAC_FAN_LEVEL_5 = 0x70,
+  // 0x20 = "Quiet" FAN SPEED (upstream PanaAC semantics). Only produced/consumed with
+  // powerful_quiet: legacy; on special-mode models Quiet is a special mode instead and this
+  // level is never transmitted.
   PANAAC_FAN_QUIET = 0x20,
+};
+
+/// How Powerful / Quiet are exposed on this model family (powerful_quiet YAML option).
+enum PowerfulQuietMode : uint8_t {
+  /// This fork's target models: Quiet and Powerful are mutually-exclusive SPECIAL MODES toggled
+  /// by short 8-byte command frames (PANAAC_CMD_*), cleared by the AC at power-on, Powerful
+  /// auto-expires after 4h, and the tri-state can be persisted across ESP restarts.
+  PQ_MODE_SPECIAL = 0,
+  /// Upstream PanaAC semantics: Quiet is a FAN SPEED (level byte 0x20) and Powerful is the
+  /// byte-13 bit inside the full state frame. No command frames, no power-on clear, no 4h timer
+  /// and no special-mode persistence (the generic climate restore already carries the preset).
+  PQ_MODE_LEGACY,
 };
 
 enum SwingVPos : uint8_t {
@@ -123,6 +139,49 @@ enum Preset : uint8_t {
   PANAAC_PRESET_NONE = 0,
   PANAAC_PRESET_POWERFUL = 1,
   PANAAC_PRESET_ECO = 2,
+  /// Quiet as a SPECIAL MODE (not a fan level): on models like the CW-SU70AA, Quiet is a
+  /// mutually-exclusive one-touch mode alongside Powerful, sent via a short command frame.
+  PANAAC_PRESET_QUIET = 3,
+};
+
+/// Short 8-byte command frames captured from the CW-SU70AA remote (POWERFUL / QUIET buttons).
+/// The button commands are TOGGLES: every press sends the same frame and the AC flips the mode
+/// itself (on, or switching from the other special mode). Byte 7 is the sum of bytes 0..6.
+const std::array<uint8_t, 8> PANAAC_CMD_POWERFUL = {{0x02, 0x20, 0xE0, 0x04, 0x80, 0x86, 0x35, 0x41}};
+const std::array<uint8_t, 8> PANAAC_CMD_QUIET = {{0x02, 0x20, 0xE0, 0x04, 0x80, 0x81, 0x33, 0x3A}};
+
+/// After transmitting, ignore any received frame for this long. The IR receiver can pick up our
+/// own burst (RX/TX sit close on the Athom); mirroring our own echo would corrupt toggle semantics.
+/// Comfortably longer than one burst (~260 ms full frame) but short enough that a real remote press
+/// a moment later is still honored.
+const uint32_t PANAAC_RX_SELF_IGNORE_MS = 500;
+
+/// The AC automatically cancels Powerful mode after 4 hours (per manual). We mirror the timer
+/// locally so Home Assistant reflects the AC state without sending any IR.
+const uint32_t PANAAC_POWERFUL_TIMEOUT_MS = 4u * 60u * 60u * 1000u;
+/// While Powerful is active, re-persist the remaining seconds this often so an ESP restart
+/// keeps the countdown roughly accurate (bounded flash wear: max 16 writes per 4h session).
+/// Only used by SM_PERSIST_FULL.
+const uint32_t PANAAC_POWERFUL_PERSIST_INTERVAL_MS = 15u * 60u * 1000u;
+
+/// How the special mode (Powerful/Quiet) + Powerful countdown survive an ESP restart.
+/// YAML: special_mode_persistence. The cost traded here is flash writes (ESP32 endurance is
+/// ~100k cycles, so even FULL — ~34 writes per 4h session — is a multi-year margin); the benefit
+/// is keeping the toggle state correct across a restart (the IR path is one-way, so the ESP is
+/// the only thing that can know whether the AC is currently in Powerful/Quiet).
+enum SpecialModePersistence : uint8_t {
+  /// No flash writes at all: the special mode lives in RAM only. After an ESP restart the
+  /// controller assumes "none" — if the AC was actually still in Powerful/Quiet, the next
+  /// toggle from HA would send the frame and switch it OFF while HA shows it on. Recover by
+  /// power-cycling the AC (power-on clears the modes). Cheapest for flash, weakest consistency.
+  SM_PERSIST_NONE = 0,
+  /// Persist only WHICH special mode is active (2 writes per toggle; no periodic countdown
+  /// writes). A restart mid-Powerful resumes the mode with a fresh 4h countdown, so the
+  /// displayed countdown can be up to 4h too long, but the on/off state stays correct.
+  SM_PERSIST_MODE_ONLY,
+  /// Persist the mode + the remaining countdown, refreshed every 15 min while Powerful is
+  /// active (default; ~34 writes per 4h session, restart resume accurate to within 15 min).
+  SM_PERSIST_FULL,
 };
 
 constexpr bool is_valid_swing_v_pos(uint8_t value) {
@@ -167,8 +226,7 @@ static const char *const STR_FAN_L2 = "Level 2";
 static const char *const STR_FAN_L3 = "Level 3";
 static const char *const STR_FAN_L4 = "Level 4";
 static const char *const STR_FAN_L5 = "Level 5";
-static const char *const STR_FAN_QUIET = "Quiet";
-static const char *const STR_FAN_POWERFUL = "Powerful";
+static const char *const STR_FAN_QUIET = "Quiet";  // legacy mode fan speed only
 
 static const char *const STR_SWINGV_AUTO = "Auto";
 static const char *const STR_SWINGV_HIGHEST = "Highest";
@@ -187,11 +245,14 @@ static const char *const STR_SWINGH_RIGHTMAX = "Right Max";
 static const char *const STR_PRESET_NONE = "None";
 static const char *const STR_PRESET_POWERFUL = "Powerful";
 static const char *const STR_PRESET_ECO = "Eco";
+static const char *const STR_PRESET_QUIET = "Quiet";
 
 inline const char *preset_to_str(Preset preset) {
   switch (preset) {
     case PANAAC_PRESET_POWERFUL:
       return STR_PRESET_POWERFUL;
+    case PANAAC_PRESET_QUIET:
+      return STR_PRESET_QUIET;
     case PANAAC_PRESET_ECO:
       return STR_PRESET_ECO;
     default:
@@ -205,6 +266,8 @@ inline bool parse_preset(const char *value, Preset &preset) {
   } else if (strcmp(value, STR_PRESET_POWERFUL) == 0 || strcmp(value, "powerful") == 0 ||
              strcmp(value, "boost") == 0 || strcmp(value, "BOOST") == 0) {
     preset = PANAAC_PRESET_POWERFUL;
+  } else if (strcmp(value, STR_PRESET_QUIET) == 0 || strcmp(value, "quiet") == 0 || strcmp(value, "QUIET") == 0) {
+    preset = PANAAC_PRESET_QUIET;
   } else if (strcmp(value, STR_PRESET_ECO) == 0 || strcmp(value, "eco") == 0 || strcmp(value, "ECO") == 0) {
     preset = PANAAC_PRESET_ECO;
   } else {
@@ -248,7 +311,7 @@ inline bool parse_fan_level(const char *value, FanLevel &level) {
   else if (strcmp(value, STR_FAN_L5) == 0)
     level = PANAAC_FAN_LEVEL_5;
   else if (strcmp(value, STR_FAN_QUIET) == 0)
-    level = PANAAC_FAN_QUIET;
+    level = PANAAC_FAN_QUIET;  // accepted in legacy mode only (see the callers' trait gating)
   else
     return false;
   return true;

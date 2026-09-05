@@ -23,6 +23,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/core/preferences.h"
 #include <array>
 #include <cstddef>
 #include <span>
@@ -77,10 +78,15 @@ class PanaACV2Climate : public climate::Climate,
   void set_supports_powerful(bool supports) { this->supports_powerful_ = supports; }
   void set_supports_eco(bool supports) { this->supports_eco_ = supports; }
   void set_fan_5level(bool fan_5level) { this->fan_5level_ = fan_5level; }
+  void set_swing_vertical(bool swing_vertical) { this->swing_vertical_ = swing_vertical; }
   void set_swing_horizontal(bool swing_horizontal) { this->swing_horizontal_ = swing_horizontal; }
   void set_temp_step(float temp_step) { this->temp_step_ = temp_step; }
   void set_ir_control(bool ir_control) { this->ir_control_ = ir_control; }
   void set_sensor(sensor::Sensor *sensor) { this->sensor_ = sensor; }
+  void set_special_mode_persistence(SpecialModePersistence persistence) {
+    this->special_mode_persistence_ = persistence;
+  }
+  void set_powerful_quiet_mode(PowerfulQuietMode mode) { this->powerful_quiet_mode_ = mode; }
 
   void set_swingv(PanaACV2SwingV *swingv) { this->swingv_ = swingv; }
   void set_swingh(PanaACV2SwingH *swingh) { this->swingh_ = swingh; }
@@ -107,9 +113,13 @@ class PanaACV2Climate : public climate::Climate,
 
   // IR core (operate on ac_state).
   void transmit_data_();
+  /// Send the fixed 8-byte wake frame followed by one short command frame (powerful / quiet).
+  void transmit_command_frame_(const std::array<uint8_t, 8> &command);
   bool decode_data_(remote_base::RemoteReceiveData data, std::array<uint8_t, 27> &state_bytes, size_t &state_len);
   bool decode_state_(std::span<const uint8_t> state_bytes, ClimateState &state);
   bool decode_and_apply_(std::span<const uint8_t> state_bytes);
+  /// Decode a fixed-size 8-byte short frame (wake frame or command frame) from a 132-item capture.
+  bool decode_short_frame_(remote_base::RemoteReceiveData &data, std::array<uint8_t, 8> &bytes);
 
   // State synchronization helpers.
   void sync_to_climate_();         // derive Climate base fields (+ v2 custom strings) from ac_state
@@ -117,6 +127,16 @@ class PanaACV2Climate : public climate::Climate,
   void publish_state_by_mode_();   // v2: MQTT publish_state_() + publish_state(); v1: publish_state()
   void recompute_swing_mode_();    // derive ac_state.swing_mode from swing_v_pos / swing_h_pos
   void update_action_();           // derive Climate action from the commanded mode (one-way IR)
+
+  // Special-mode (Powerful / Quiet) management.
+  /// Set ac_state.preset, (re)arm/clear the 4h powerful timer, and persist mode + remaining time.
+  /// Returns true when the mode actually changed. Does NOT publish or transmit.
+  bool set_special_mode_(Preset next);
+  /// loop() hook: auto-clear powerful after 4h (AC does it itself; state-only update, no IR) and
+  /// periodically re-persist the remaining time so an ESP restart keeps the countdown accurate.
+  void update_powerful_timer_();
+  /// Persist the special mode + powerful remaining seconds to flash (no-ops while unchanged).
+  void persist_special_mode_();
 
 #ifdef USE_MQTT
   // v2 MQTT publish helpers (only used when mqtt_enabled_).
@@ -142,6 +162,7 @@ class PanaACV2Climate : public climate::Climate,
   bool supports_fan_only_{false};
   bool supports_quiet_{false};
   bool fan_5level_{false};
+  bool swing_vertical_{true};
   bool swing_horizontal_{false};
   float temp_step_{1.0f};
   bool ir_control_{false};
@@ -164,6 +185,29 @@ class PanaACV2Climate : public climate::Climate,
   // burst. on_set_json_() performs the single publish/transmit once all fields are applied.
   bool mqtt_command_active_{false};
   bool pending_change_{false};
+
+  // Special-mode persistence (survives an ESP restart). Home Assistant restarts need nothing
+  // here: the ESP device is the source of truth and republishes its full climate state when HA
+  // reconnects to the native API. How much flash that costs is configurable
+  // (special_mode_persistence: none / mode_only / full).
+  // Built in setup() via global_preferences->make_preference<uint32_t>(fnv1_hash(...), true).
+  SpecialModePersistence special_mode_persistence_{SM_PERSIST_FULL};
+  // How Powerful/Quiet are exposed: PQ_MODE_SPECIAL (default, this fork's toggle-frame models)
+  // or PQ_MODE_LEGACY (upstream semantics: Quiet = fan speed, Powerful = state-frame bit; all
+  // special-mode machinery — command frames, power-on clear, 4h timer, persistence, short-frame
+  // RX mirroring — is disabled in legacy mode).
+  PowerfulQuietMode powerful_quiet_mode_{PQ_MODE_SPECIAL};
+  ESPPreferenceObject pref_special_mode_;
+  ESPPreferenceObject pref_powerful_remaining_;
+  // 4h Powerful countdown in the millis() domain; only meaningful while preset == POWERFUL.
+  uint32_t powerful_deadline_ms_{0};
+  uint32_t next_powerful_persist_ms_{0};
+
+  // Self-reception guard. The IR receiver can pick up our own transmitted burst (RX/TX sit close
+  // together on the Athom). Powerful/Quiet are TOGGLE command frames, so mirroring our own echo
+  // would flip the mode right back and HA would show the wrong (reset) state. After every
+  // transmit we ignore received frames until this millis() deadline.
+  uint32_t rx_ignore_until_ms_{0};
 };
 
 }  // namespace esphome::panaac_v2

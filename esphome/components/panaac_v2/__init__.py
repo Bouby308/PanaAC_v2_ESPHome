@@ -56,9 +56,32 @@ CONF_SUPPORTS_QUIET = "supports_quiet"
 CONF_SUPPORTS_POWERFUL = "supports_powerful"
 CONF_SUPPORTS_ECO = "supports_eco"
 CONF_FAN_5LEVEL = "fan_5level"
+CONF_SWING_VERTICAL = "swing_vertical"
 CONF_SWING_HORIZONTAL = "swing_horizontal"
 CONF_TEMP_STEP = "temp_step"
 CONF_IR_CONTROL = "ir_control"
+CONF_SPECIAL_MODE_PERSISTENCE = "special_mode_persistence"
+CONF_POWERFUL_QUIET = "powerful_quiet"
+
+powerful_quiet_mode_ns = panaac_v2_ns.enum("PowerfulQuietMode")
+POWERFUL_QUIET_MODE = {
+    # This fork's models: Quiet/Powerful are mutually-exclusive special modes toggled via short
+    # command frames (power-on clears them, Powerful auto-expires after 4h, persistable)
+    "special": powerful_quiet_mode_ns.PQ_MODE_SPECIAL,
+    # Upstream PanaAC semantics: Quiet is a fan speed (0x20) and Powerful is the state-frame
+    # byte-13 bit; command frames / the 4h timer / special-mode persistence are all disabled
+    "legacy": powerful_quiet_mode_ns.PQ_MODE_LEGACY,
+}
+
+special_mode_persistence_ns = panaac_v2_ns.enum("SpecialModePersistence")
+SPECIAL_MODE_PERSISTENCE = {
+    # no flash writes; special mode is lost on ESP restart (HA may then send an inverted toggle)
+    "none": special_mode_persistence_ns.SM_PERSIST_NONE,
+    # 2 writes per toggle (mode only); a restart mid-Powerful resumes with a fresh 4h countdown
+    "mode_only": special_mode_persistence_ns.SM_PERSIST_MODE_ONLY,
+    # mode + remaining time every 15 min (~34 writes per 4h session); most accurate resume
+    "full": special_mode_persistence_ns.SM_PERSIST_FULL,
+}
 
 CONF_SWINGV_ID = "swingv_id"
 CONF_SWINGH_ID = "swingh_id"
@@ -84,10 +107,13 @@ CONFIG_SCHEMA = climate.climate_schema(PanaACV2Climate).extend({
     cv.Optional(CONF_SUPPORTS_POWERFUL, default=False): cv.boolean,
     cv.Optional(CONF_SUPPORTS_ECO, default=False): cv.boolean,
     cv.Optional(CONF_FAN_5LEVEL, default=False): cv.boolean,
+    cv.Optional(CONF_SWING_VERTICAL, default=True): cv.boolean,
     cv.Optional(CONF_SWING_HORIZONTAL, default=False): cv.boolean,
     cv.Optional(CONF_TEMP_STEP, default=1.0): _validate_temp_step,
     cv.Optional(CONF_SENSOR): cv.use_id(sensor.Sensor),
     cv.Optional(CONF_IR_CONTROL, default=False): cv.boolean,
+    cv.Optional(CONF_SPECIAL_MODE_PERSISTENCE, default="full"): cv.enum(SPECIAL_MODE_PERSISTENCE),
+    cv.Optional(CONF_POWERFUL_QUIET, default="special"): cv.enum(POWERFUL_QUIET_MODE),
     cv.GenerateID(CONF_SWINGV_ID): cv.declare_id(PanaACV2SwingV),
     cv.GenerateID(CONF_SWINGH_ID): cv.declare_id(PanaACV2SwingH),
 }).extend(cv.COMPONENT_SCHEMA).extend(remote_base.REMOTE_TRANSMITTABLE_SCHEMA).extend(remote_base.REMOTE_LISTENER_SCHEMA)
@@ -167,21 +193,26 @@ async def to_code(config):
     cg.add(var.set_supports_powerful(config[CONF_SUPPORTS_POWERFUL]))
     cg.add(var.set_supports_eco(config[CONF_SUPPORTS_ECO]))
     cg.add(var.set_fan_5level(config[CONF_FAN_5LEVEL]))
+    cg.add(var.set_swing_vertical(config[CONF_SWING_VERTICAL]))
     cg.add(var.set_swing_horizontal(config[CONF_SWING_HORIZONTAL]))
     cg.add(var.set_temp_step(config[CONF_TEMP_STEP]))
     cg.add(var.set_ir_control(config[CONF_IR_CONTROL]))
+    cg.add(var.set_special_mode_persistence(config[CONF_SPECIAL_MODE_PERSISTENCE]))
+    cg.add(var.set_powerful_quiet_mode(config[CONF_POWERFUL_QUIET]))
     if sensor_id := config.get(CONF_SENSOR):
         sens = await cg.get_variable(sensor_id)
         cg.add(var.set_sensor(sens))
 
-    # Companion Swing V/H selects (PanaAC v1 features), created in BOTH modes — the granular swing
-    # positions are not on the climate card. When device_id is configured, these selects are
+    # Companion Swing V/H selects (PanaAC v1 features) — the granular swing positions are not on
+    # the climate card. Each select is created only when the unit physically has that swing axis
+    # (swing_vertical / swing_horizontal). When device_id is configured, these selects are
     # grouped with the climate under that ESPHome sub-device. Fan levels are NOT a select: they are the climate's
     # custom fan modes (Fan Mode) in both modes, so no Fan Level select is created.
-    swingv = await _make_select(config[CONF_SWINGV_ID], "Swing Vertical",
-                                "mdi:arrow-expand-vertical", var, device_id=device_id,
-                                hide=hide_legacy)
-    cg.add(var.set_swingv(swingv))
+    if config[CONF_SWING_VERTICAL]:
+        swingv = await _make_select(config[CONF_SWINGV_ID], "Swing Vertical",
+                                    "mdi:arrow-expand-vertical", var, device_id=device_id,
+                                    hide=hide_legacy)
+        cg.add(var.set_swingv(swingv))
     if config[CONF_SWING_HORIZONTAL]:
         swingh = await _make_select(config[CONF_SWINGH_ID], "Swing Horizontal",
                                     "mdi:arrow-expand-horizontal", var, device_id=device_id,
