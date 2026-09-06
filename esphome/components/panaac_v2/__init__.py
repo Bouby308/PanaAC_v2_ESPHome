@@ -213,7 +213,11 @@ async def to_code(config):
                                     "mdi:arrow-expand-vertical", var, device_id=device_id,
                                     hide=hide_legacy)
         cg.add(var.set_swingv(swingv))
-    if config[CONF_SWING_HORIZONTAL]:
+    # On vane-less units (swing_vertical: false) the protocol's horizontal byte is pinned and the
+    # swing motor is driven by the vane nibble: granular positions are not expressible at all, so
+    # the select could only do swing-on/off — exactly the climate card's swing control. Skip it;
+    # its positions only carry meaning when the unit also has the vane byte the encoder uses.
+    if config[CONF_SWING_HORIZONTAL] and config[CONF_SWING_VERTICAL]:
         swingh = await _make_select(config[CONF_SWINGH_ID], "Swing Horizontal",
                                     "mdi:arrow-expand-horizontal", var, device_id=device_id,
                                     hide=hide_legacy)
